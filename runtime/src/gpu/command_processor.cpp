@@ -17,6 +17,7 @@
 
 #include "cafe/guest.h"
 #include "cafe/runtime.h"
+#include "host/platform.h"
 
 #include <condition_variable>
 #include <cstdio>
@@ -200,7 +201,7 @@ void retire_later(const Retirement& r) {
 
 void retire(uint64_t timestamp);
 void retirement_main() {
-    pthread_setname_np(pthread_self(), "gpu retire");
+    cafe::host::set_thread_name("gpu retire");
     for (;;) {
         Retirement r;
         {
@@ -545,7 +546,7 @@ void retire(uint64_t timestamp) {
 }
 
 void command_processor_main() {
-    pthread_setname_np(pthread_self(), "gpu");
+    cafe::host::set_thread_name("gpu");
     for (;;) {
         Submission s;
         {

@@ -31,6 +31,7 @@
 #include "host/window.h"
 
 #include "cafe/runtime.h"
+#include "host/platform.h"
 
 #include <algorithm>
 #include <chrono>
@@ -415,7 +416,7 @@ void Renderer::choose_presentation(double hz) {
 }
 
 void Renderer::presenter_main() {
-    pthread_setname_np(pthread_self(), "present");
+    cafe::host::set_thread_name("present");
     // The mode follows the window's display: chosen again when the window
     // moves to another display or its mode changes, or when the display
     // turns out to refresh at another rate than reported.

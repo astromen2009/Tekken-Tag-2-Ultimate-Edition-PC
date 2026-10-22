@@ -3,6 +3,7 @@
 #include "cafe/export.h"
 #include "cafe/ppc_ops.h"
 #include "cafe/sysmem.h"
+#include "host/platform.h"
 
 #include <algorithm>
 #include <chrono>
@@ -116,7 +117,7 @@ void* host_main(void* argument) {
     // "OSThread address/core", for debuggers and profilers.
     char name[16];
     std::snprintf(name, sizeof(name), "%08X/%d", t->guest, t->core);
-    pthread_setname_np(pthread_self(), name);
+    cafe::host::set_thread_name(name);
     t_current = t;
     set_current_context(&t->ctx);
     uint32_t exit_value;

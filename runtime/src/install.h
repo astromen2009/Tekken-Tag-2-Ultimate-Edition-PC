@@ -13,6 +13,11 @@
 // $XDG_CONFIG_HOME/ttt2/installed            the install folder
 // $XDG_DATA_HOME/applications/ttt2.desktop   "Tekken Tag Tournament 2" in the menu
 //                                            (ttt2 is the window's app id)
+//
+// On Windows the executable is "Tekken Tag Tournament 2.exe", with the
+// libraries beside it and the icon also as icon.ico; the install folder is
+// recorded in %APPDATA%\ttt2\installed and the menu entry is a shortcut in
+// the Start menu's Programs folder.
 
 #include <cstdint>
 #include <filesystem>

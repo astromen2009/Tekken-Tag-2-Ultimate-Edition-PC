@@ -1,6 +1,10 @@
 #include "host/keymap.h"
 
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <wchar.h>
+#include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cerrno>
@@ -68,9 +72,36 @@ Key key_of(std::string_view value, const Resolver& resolve) {
     return {key, {}};
 }
 
+#ifndef _WIN32
 fs::path home() {
     const char* h = std::getenv("HOME");
     return h && *h ? fs::path(h) : fs::path("/");
+}
+#endif
+
+// stat(2) as both systems have it (Windows: the wide-path call, 64-bit sizes).
+#ifdef _WIN32
+using FileStat = struct _stat64;
+int stat_file(const fs::path& file, FileStat& st) { return _wstat64(file.c_str(), &st); }
+bool regular(const FileStat& st) { return (st.st_mode & _S_IFMT) == _S_IFREG; }
+#else
+using FileStat = struct stat;
+int stat_file(const fs::path& file, FileStat& st) { return ::stat(file.c_str(), &st); }
+bool regular(const FileStat& st) { return S_ISREG(st.st_mode); }
+#endif
+
+// Where the port's settings are: $XDG_CONFIG_HOME/ttt2 (default
+// ~/.config/ttt2), %APPDATA%\ttt2 on Windows.
+fs::path config_folder() {
+#ifdef _WIN32
+    const wchar_t* appdata = _wgetenv(L"APPDATA");
+    if (appdata && *appdata) return fs::path(appdata) / "ttt2";
+    const wchar_t* profile = _wgetenv(L"USERPROFILE");
+    return fs::path(profile && *profile ? profile : L"C:\\") / "AppData" / "Roaming" / "ttt2";
+#else
+    const char* config = std::getenv("XDG_CONFIG_HOME");
+    return (config && *config == '/' ? fs::path(config) : home() / ".config") / "ttt2";
+#endif
 }
 
 } // namespace
@@ -132,15 +163,14 @@ Parsed parse(std::string_view text, const Resolver& resolve) {
 }
 
 fs::path file_path() {
-    const char* config = std::getenv("XDG_CONFIG_HOME");
-    return (config && *config == '/' ? fs::path(config) : home() / ".config") / "ttt2" / "keyboard.ini";
+    return config_folder() / "keyboard.ini";
 }
 
 Loaded load(const fs::path& file, const Resolver& resolve) {
     Loaded loaded{default_keys(), {}};
     const std::string name = file.string();
-    struct stat st{};
-    if (::stat(file.c_str(), &st) != 0) {
+    FileStat st{};
+    if (stat_file(file, st) != 0) {
         const int error = errno;
         loaded.log.push_back(error == ENOENT || error == ENOTDIR
                                  ? "keyboard: defaults (no " + name + ")"
@@ -148,7 +178,7 @@ Loaded load(const fs::path& file, const Resolver& resolve) {
         return loaded;
     }
     // Never open a pipe or a device: that could wait forever.
-    if (!S_ISREG(st.st_mode)) {
+    if (!regular(st)) {
         loaded.log.push_back("keyboard: defaults (" + name + " is not a file)");
         return loaded;
     }
@@ -185,10 +215,29 @@ Loaded load(const fs::path& file, const Resolver& resolve) {
 Watcher::Watcher(fs::path file, Resolver resolve) : file_(std::move(file)), resolve_(std::move(resolve)) {}
 
 Watcher::Stamp Watcher::stamp() const {
-    struct stat st{};
-    if (::stat(file_.c_str(), &st) != 0) return {};
+#ifdef _WIN32
+    // The volume and file index stand for the device and inode; the times
+    // are in 100 ns ticks.
+    const HANDLE handle = CreateFileW(file_.c_str(), FILE_READ_ATTRIBUTES,
+                                      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return {};
+    BY_HANDLE_FILE_INFORMATION info{};
+    const bool got = GetFileInformationByHandle(handle, &info);
+    CloseHandle(handle);
+    if (!got) return {};
+    const auto ticks = [](const FILETIME& t) {
+        return static_cast<int64_t>(uint64_t{t.dwHighDateTime} << 32 | t.dwLowDateTime);
+    };
+    return {true, info.dwVolumeSerialNumber, uint64_t{info.nFileIndexHigh} << 32 | info.nFileIndexLow,
+            uint64_t{info.nFileSizeHigh} << 32 | info.nFileSizeLow, ticks(info.ftLastWriteTime),
+            ticks(info.ftCreationTime)};
+#else
+    FileStat st{};
+    if (stat_file(file_, st) != 0) return {};
     const auto ns = [](const timespec& t) { return int64_t{t.tv_sec} * 1'000'000'000 + t.tv_nsec; };
     return {true, st.st_dev, st.st_ino, static_cast<uint64_t>(st.st_size), ns(st.st_mtim), ns(st.st_ctim)};
+#endif
 }
 
 std::optional<Loaded> Watcher::reload() {

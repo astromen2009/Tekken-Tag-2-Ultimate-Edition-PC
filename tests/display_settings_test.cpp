@@ -6,7 +6,9 @@
 #include "host/display_settings.h"
 
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <cstdio>
@@ -351,6 +353,13 @@ void test_format() {
 }
 
 void test_path(const fs::path& scratch) {
+#ifdef _WIN32
+    const wchar_t* old_appdata = _wgetenv(L"APPDATA");
+    const std::wstring appdata = old_appdata ? old_appdata : L"";
+    _wputenv_s(L"APPDATA", (scratch / "appdata").c_str());
+    check(display::file_path() == scratch / "appdata/ttt2/display.ini", "APPDATA");
+    _wputenv_s(L"APPDATA", appdata.c_str());
+#else
     const char* old_home = std::getenv("HOME");
     const char* old_config = std::getenv("XDG_CONFIG_HOME");
     const std::string home = old_home ? old_home : "", config = old_config ? old_config : "";
@@ -369,6 +378,7 @@ void test_path(const fs::path& scratch) {
 
     if (old_home) setenv("HOME", home.c_str(), 1);
     if (old_config) setenv("XDG_CONFIG_HOME", config.c_str(), 1);
+#endif
 }
 
 void test_load(const fs::path& scratch) {
@@ -405,9 +415,11 @@ void test_load(const fs::path& scratch) {
                                                        "interpolation no (from " + name + ")"},
           "the launcher's file: " + joined(launcher.log));
 
+#ifndef _WIN32 // (Windows lets only administrators and developer mode make links.)
     const fs::path link = scratch / "link.ini";
     fs::create_symlink(file, link);
     check(display::load(link).settings == written, "a link to the file");
+#endif
 
     write(file, "");
     const display::Loaded empty = display::load(file);
@@ -428,12 +440,14 @@ void test_load(const fs::path& scratch) {
     refused(display::load(folder), folder.string() + " is not a file", "a folder");
     const fs::path pipe = scratch / "pipe.ini";
     fs::remove(pipe);
+#ifndef _WIN32
     if (mkfifo(pipe.c_str(), 0600) == 0) {
         refused(display::load(pipe), pipe.string() + " is not a file", "a pipe");
         fs::remove(pipe);
     } else {
         check(false, std::string("cannot make a pipe: ") + std::strerror(errno));
     }
+#endif
 
     // 64 KiB is still read, a byte more is not.
     const std::string first = "fullscreen = yes\n#";
@@ -445,6 +459,7 @@ void test_load(const fs::path& scratch) {
 
     // Unreadable: the file itself, or the folder it is in. Root reads them
     // anyway.
+#ifndef _WIN32
     const fs::path unreadable = scratch / "unreadable.ini";
     write(unreadable, "fullscreen = yes\n");
     fs::permissions(unreadable, fs::perms::none);
@@ -461,13 +476,16 @@ void test_load(const fs::path& scratch) {
     }
     fs::permissions(locked, fs::perms::owner_all);
     fs::permissions(unreadable, fs::perms::owner_read | fs::perms::owner_write);
+#endif
 
     // Opened, but the read fails (EIO, as from a failing disk): Linux's
     // /proc/self/mem is a regular file whose first bytes are never mapped.
+#ifndef _WIN32
     if (std::ifstream("/proc/self/mem").is_open()) {
         refused(display::load("/proc/self/mem"), std::string("cannot read /proc/self/mem: ") + std::strerror(EIO),
                 "a failed read");
     }
+#endif
 }
 
 void test_resolve() {

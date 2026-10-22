@@ -91,7 +91,8 @@ struct Parsed {
 Parsed parse(std::string_view text, const Resolver& resolve);
 
 // $XDG_CONFIG_HOME/ttt2/keyboard.ini (only an absolute XDG_CONFIG_HOME
-// counts, else ~/.config), as the install's config file.
+// counts, else ~/.config), as the install's config file; %APPDATA%\ttt2\keyboard.ini
+// on Windows.
 std::filesystem::path file_path();
 
 struct Loaded {

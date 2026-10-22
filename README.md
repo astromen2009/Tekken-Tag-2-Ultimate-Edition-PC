@@ -3,7 +3,7 @@
 <img width="1593" height="888" alt="image" src="https://github.com/user-attachments/assets/3bd58409-1442-4ce7-b9a6-8f036f38f4f8" />
 
 
-An unofficial native Linux port of **Tekken Tag Tournament 2 Wii U Edition**,
+An unofficial native Linux and Windows port of **Tekken Tag Tournament 2 Wii U Edition**,
 made by static recompilation: the game's PowerPC code is translated to C++
 ahead of time and runs as native x86-64 code on a reimplementation of the
 Wii U's system libraries. There is no CPU emulation; the game's GPU commands
@@ -61,7 +61,9 @@ Playable from boot through arcade mode. Not done yet: the Wii U GamePad's
 screen and speaker, online play, the software keyboard and error viewer
 screens, and audio effects the game does not seem to use. Only the European
 version with update 16 is supported (other versions have different code).
-Tested on Linux with an AMD GPU (RADV) under KDE Plasma (Wayland). Design
+Tested on Linux with an AMD GPU (RADV) under KDE Plasma (Wayland). The
+Windows build (MSYS2 CLANG64) compiles, installs and passes the tests that
+need no game files, but has not been played through on Windows yet. Design
 notes, measurements and milestones are in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -85,8 +87,8 @@ refuse a game whose executable is not the one they were built from.
 
 ## Requirements
 
-- Linux on x86-64 with AVX2 and FMA (x86-64-v3: Intel Haswell, AMD Excavator
-  or newer).
+- Linux or Windows 10/11 on x86-64 with AVX2 and FMA (x86-64-v3: Intel
+  Haswell, AMD Excavator or newer).
 - A Vulkan 1.3 GPU and driver with `VK_EXT_external_memory_host` and push
   descriptors (current AMD, Intel and NVIDIA drivers).
 - To build: Git, CMake 3.20+, Ninja, Clang (or GCC 15+), Python 3, and the
@@ -105,6 +107,18 @@ sudo pacman -S --needed base-devel git cmake ninja clang python zstd zlib openss
 Other distributions package the same libraries under similar names; older
 releases such as Ubuntu 24.04 and Debian 12 ship SDL and Vulkan headers that
 are too old.
+
+On Windows, build in [MSYS2](https://www.msys2.org/)'s **CLANG64**
+environment (MSVC is not supported: the generated code relies on Clang's weak
+symbols, aliases and `musttail`). In the "MSYS2 CLANG64" terminal:
+
+```bash
+pacman -S --needed git mingw-w64-clang-x86_64-{toolchain,cmake,ninja,python,sdl3,shaderc,vulkan-headers,vulkan-loader,openssl,zstd,zlib}
+```
+
+The Vulkan driver itself comes with the GPU's driver (AMD, NVIDIA, Intel).
+The launcher (below) is Linux's alone: on Windows the game is built with the
+commands of the next section and installed with `ttt2.exe --install`.
 
 ## Building
 
@@ -125,6 +139,14 @@ build/recomp/cafe-recomp local/wua/*_v16/code/Tekken.rpx generated/ttt2
 cmake -B build -DTTT2_GENERATED_DIR="$PWD/generated/ttt2"
 cmake --build build --target ttt2
 ```
+
+On Windows the commands are the same in the MSYS2 CLANG64 terminal (the
+programs are `build/wua_extract.exe`, `build/recomp/cafe-recomp.exe` and
+`build/ttt2.exe`; paths can be written `/c/Users/...` or `C:/Users/...`).
+After building, `ttt2.exe` has the libraries it needs (SDL3, shaderc,
+OpenSSL, the C++ runtime) copied beside it, so it also starts from Windows'
+Explorer or a `cmd` prompt; `-DTTT2_DLL_DIRS=<folders>` adds folders to take
+them from.
 
 Recompiling takes a few seconds; compiling the generated code takes a few
 minutes. `local/`, `generated/`, `third_party/` and `build*/` are ignored by
@@ -219,6 +241,12 @@ Saves go to `~/.local/share/ttt2/save` and compiled shaders to
 `~/.cache/ttt2`. F11 toggles fullscreen while the game runs (whether it
 starts fullscreen is a setting, below).
 
+On Windows, `ttt2.exe --install` copies `Tekken Tag Tournament 2.exe` with
+its libraries into the install folder and adds a **Tekken Tag Tournament 2**
+shortcut to the Start menu. Saves go to `%APPDATA%\ttt2\save`, character
+packs are read from `%APPDATA%\ttt2\characters` and compiled shaders go to
+`%LOCALAPPDATA%\ttt2`.
+
 | Wii U GamePad | Keyboard |
 | --- | --- |
 | D-pad up / left / down / right | W / A / S / D |
@@ -241,7 +269,7 @@ kick and L right kick. Keys go by position, as on a US QWERTY keyboard.
 These are the defaults: the launcher's **Settings** (the gear next to Play)
 change them, at once, also while the game runs, and **Restore Defaults**
 there brings them back. They are kept in `~/.config/ttt2/keyboard.ini`
-(`$XDG_CONFIG_HOME/ttt2/`), one `input = key` per line, which can be edited
+(`$XDG_CONFIG_HOME/ttt2/`; on Windows `%APPDATA%\ttt2\keyboard.ini`), one `input = key` per line, which can be edited
 by hand too ([its format](docs/ARCHITECTURE.md#running-the-port)); F11,
 Escape and the Windows keys cannot be given to a button, and the game prints
 what it read when it starts.
@@ -264,8 +292,9 @@ The launcher's **Settings** also choose how the game starts: fullscreen or
 in a window, the resolution it draws at (Automatic, the default, is enough
 to cover your main display) and whether it shows 120 frames per second on
 displays of 100 Hz and more (on by default). They are kept in
-`~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`), which can be
-edited by hand too:
+`~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`; on Windows
+`%APPDATA%\ttt2\display.ini`), which can be edited by hand too (on
+Windows, the only way, as the launcher is Linux's):
 
 ```ini
 fullscreen = no             # yes or no
@@ -288,7 +317,7 @@ variables below win over it.
 | `TTT2_AUDIO_VOLUME=0..100` | volume in percent (default 100) |
 | `TTT2_SAVE_DIR=<folder>` | where saves go |
 | `TTT2_CONTROLLER=playstation/nintendo/xbox` | icons and menu buttons for this kind of controller, whichever is used |
-| `TTT2_CHARACTERS=<folder>` | where character packs are (default `$XDG_DATA_HOME/ttt2/characters`, else `~/.local/share/ttt2/characters`) |
+| `TTT2_CHARACTERS=<folder>` | where character packs are (default `$XDG_DATA_HOME/ttt2/characters`, else `~/.local/share/ttt2/characters`; on Windows `%APPDATA%\ttt2\characters`) |
 
 Debugging variables are listed in
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md#running-the-port).
@@ -304,7 +333,10 @@ screen: the free ends of the top row first, then new columns beyond the rows'
 ends (19 cells; the order follows the order of import).
 
 Nothing of them is in this repository: an importer makes them from **your own
-copies of both games** and writes character packs on your computer. You need:
+copies of both games** and writes character packs on your computer. The
+importer runs on Linux only (it starts Tekken 7 through Steam's Proton); the
+packs it makes are plain files, read by the Windows build from
+`%APPDATA%\ttt2\characters`. You need:
 
 - Tekken 7 for PC (Steam), installed and started from Steam at least once
   (the importer finds it, its Proton and its prefix through Steam), and Steam

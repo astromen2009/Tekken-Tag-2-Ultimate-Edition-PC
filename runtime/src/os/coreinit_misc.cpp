@@ -8,6 +8,7 @@
 #include "cafe/layout.h"
 #include "cafe/ppc_ops.h"
 #include "cafe/sysmem.h"
+#include "host/platform.h"
 
 #include <chrono>
 #include <cstdio>
@@ -139,10 +140,7 @@ void LCStoreDMABlocks(GuestAddress memory, GuestAddress cache, uint32_t blocks) 
 int64_t ticks_since_2000() {
     const auto now = std::chrono::system_clock::now();
     const int64_t ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-    const time_t seconds = static_cast<time_t>(ns / 1000000000);
-    struct tm local;
-    localtime_r(&seconds, &local);
-    const int64_t local_ns = ns + int64_t{local.tm_gmtoff} * 1000000000;
+    const int64_t local_ns = ns + host::utc_offset(ns / 1000000000) * 1000000000;
     const int64_t since_2000 = local_ns - kUnixTo2000 * 1000000000;
     return since_2000 / 1000000000 * static_cast<int64_t>(kTimerHz) +
            since_2000 % 1000000000 * static_cast<int64_t>(kTimerHz) / 1000000000;

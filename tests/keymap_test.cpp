@@ -7,7 +7,9 @@
 #include <SDL3/SDL_keyboard.h>
 
 #include <sys/stat.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 
 #include <cerrno>
 #include <chrono>
@@ -233,6 +235,13 @@ void test_duplicates() {
 }
 
 void test_path(const fs::path& scratch) {
+#ifdef _WIN32
+    const wchar_t* old_appdata = _wgetenv(L"APPDATA");
+    const std::wstring appdata = old_appdata ? old_appdata : L"";
+    _wputenv_s(L"APPDATA", (scratch / "appdata").c_str());
+    check(keymap::file_path() == scratch / "appdata/ttt2/keyboard.ini", "APPDATA");
+    _wputenv_s(L"APPDATA", appdata.c_str());
+#else
     const char* old_home = std::getenv("HOME");
     const std::string home = old_home ? old_home : "";
     setenv("HOME", (scratch / "home").c_str(), 1);
@@ -243,6 +252,7 @@ void test_path(const fs::path& scratch) {
     unsetenv("XDG_CONFIG_HOME");
     check(keymap::file_path() == scratch / "home/.config/ttt2/keyboard.ini", "no XDG_CONFIG_HOME");
     setenv("HOME", home.c_str(), 1);
+#endif
 }
 
 void test_load(const fs::path& scratch) {
@@ -271,12 +281,14 @@ void test_load(const fs::path& scratch) {
     check(joined(keymap::load(folder, sdl_name).log).find("is not a file") != std::string::npos, "a folder");
     const fs::path pipe = scratch / "pipe.ini";
     fs::remove(pipe);
+#ifndef _WIN32
     if (mkfifo(pipe.c_str(), 0600) == 0) {
         const keymap::Loaded fifo = keymap::load(pipe, sdl_name);
         check(fifo.keys == keymap::default_keys() && joined(fifo.log).find("is not a file") != std::string::npos,
               "a pipe");
         fs::remove(pipe);
     }
+#endif
     const fs::path large = scratch / "large.ini";
     write(large, "l = 5\n" + std::string(70000, '#'));
     const keymap::Loaded big = keymap::load(large, sdl_name);
@@ -284,6 +296,7 @@ void test_load(const fs::path& scratch) {
           "a large file");
     const fs::path unreadable = scratch / "unreadable.ini";
     write(unreadable, "l = 5\n");
+#ifndef _WIN32
     fs::permissions(unreadable, fs::perms::none);
     if (getuid() != 0) {
         const keymap::Loaded denied = keymap::load(unreadable, sdl_name);
@@ -291,9 +304,11 @@ void test_load(const fs::path& scratch) {
               "an unreadable file: " + joined(denied.log));
     }
     fs::permissions(unreadable, fs::perms::owner_read | fs::perms::owner_write);
+#endif
 
     // Opened, but the read fails (EIO, as from a failing disk): Linux's
     // /proc/self/mem is a regular file whose first bytes are never mapped.
+#ifndef _WIN32
     if (std::ifstream("/proc/self/mem").is_open()) {
         const keymap::Loaded failed = keymap::load("/proc/self/mem", sdl_name);
         const std::string why = std::string("cannot read /proc/self/mem: ") + std::strerror(EIO);
@@ -301,6 +316,7 @@ void test_load(const fs::path& scratch) {
                   failed.log == std::vector<std::string>{"keyboard: defaults (" + why + ")"},
               "a failed read: " + joined(failed.log));
     }
+#endif
 }
 
 void test_watcher(const fs::path& scratch) {

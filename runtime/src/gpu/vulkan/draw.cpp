@@ -7,6 +7,7 @@
 #include "gx2/types.h"
 
 #include "cafe/runtime.h"
+#include "host/platform.h"
 
 #include <shaderc/shaderc.h>
 
@@ -108,14 +109,11 @@ struct PipelineKey {
     uint32_t depth_clamp;
 };
 
-// ~/.cache/ttt2 (or $XDG_CACHE_HOME/ttt2): compiled shaders and pipelines.
+// ~/.cache/ttt2 (or $XDG_CACHE_HOME/ttt2; %LOCALAPPDATA%\ttt2 on Windows):
+// compiled shaders and pipelines.
 std::filesystem::path cache_directory() {
     static const std::filesystem::path dir = [] {
-        std::filesystem::path d;
-        if (const char* x = std::getenv("XDG_CACHE_HOME"); x && *x) d = x;
-        else if (const char* h = std::getenv("HOME")) d = std::filesystem::path(h) / ".cache";
-        else return std::filesystem::path();
-        d /= "ttt2";
+        const std::filesystem::path d = host::cache_directory();
         std::error_code ec;
         std::filesystem::create_directories(d / "spirv", ec);
         return ec ? std::filesystem::path() : d;

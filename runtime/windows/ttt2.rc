@@ -1,0 +1,4 @@
+// The executable's manifest (ttt2.manifest).
+#include <winuser.h>
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "ttt2.manifest"

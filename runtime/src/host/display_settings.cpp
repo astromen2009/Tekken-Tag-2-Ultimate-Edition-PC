@@ -1,6 +1,9 @@
 #include "host/display_settings.h"
 
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <wchar.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -85,9 +88,36 @@ std::string summary(const Settings& s) {
 
 bool set(const char* value) { return value != nullptr && *value != '\0'; }
 
+#ifndef _WIN32
 fs::path home() {
     const char* h = std::getenv("HOME");
     return h && *h ? fs::path(h) : fs::path("/");
+}
+#endif
+
+// stat(2) as both systems have it (Windows: the wide-path call, 64-bit sizes).
+#ifdef _WIN32
+using FileStat = struct _stat64;
+int stat_file(const fs::path& file, FileStat& st) { return _wstat64(file.c_str(), &st); }
+bool regular(const FileStat& st) { return (st.st_mode & _S_IFMT) == _S_IFREG; }
+#else
+using FileStat = struct stat;
+int stat_file(const fs::path& file, FileStat& st) { return ::stat(file.c_str(), &st); }
+bool regular(const FileStat& st) { return S_ISREG(st.st_mode); }
+#endif
+
+// Where the port's settings are: $XDG_CONFIG_HOME/ttt2 (default
+// ~/.config/ttt2), %APPDATA%\ttt2 on Windows.
+fs::path config_folder() {
+#ifdef _WIN32
+    const wchar_t* appdata = _wgetenv(L"APPDATA");
+    if (appdata && *appdata) return fs::path(appdata) / "ttt2";
+    const wchar_t* profile = _wgetenv(L"USERPROFILE");
+    return fs::path(profile && *profile ? profile : L"C:\\") / "AppData" / "Roaming" / "ttt2";
+#else
+    const char* config = std::getenv("XDG_CONFIG_HOME");
+    return (config && *config == '/' ? fs::path(config) : home() / ".config") / "ttt2";
+#endif
 }
 
 Active g_active;
@@ -202,8 +232,7 @@ std::string format(const Settings& settings) {
 }
 
 fs::path file_path() {
-    const char* config = std::getenv("XDG_CONFIG_HOME");
-    return (config && *config == '/' ? fs::path(config) : home() / ".config") / "ttt2" / "display.ini";
+    return config_folder() / "display.ini";
 }
 
 Loaded load(const fs::path& file) {
@@ -214,8 +243,8 @@ Loaded load(const fs::path& file) {
         loaded.log.push_back("display: defaults (" + why + ")");
         return loaded;
     };
-    struct stat st{};
-    if (::stat(file.c_str(), &st) != 0) {
+    FileStat st{};
+    if (stat_file(file, st) != 0) {
         const int error = errno;
         if (error == ENOENT || error == ENOTDIR) {
             loaded.log.push_back("display: defaults (no " + name + ")");
@@ -224,7 +253,7 @@ Loaded load(const fs::path& file) {
         return unusable("cannot read " + name + ": " + std::strerror(error));
     }
     // Never open a pipe or a device: that could wait forever.
-    if (!S_ISREG(st.st_mode)) return unusable(name + " is not a file");
+    if (!regular(st)) return unusable(name + " is not a file");
     if (static_cast<uint64_t>(st.st_size) > kMaxFileSize) return unusable(name + " is larger than 64 KiB");
     std::ifstream in(file, std::ios::binary);
     std::string text;

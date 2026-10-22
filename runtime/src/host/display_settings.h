@@ -84,7 +84,8 @@ Parsed parse(std::string_view text);
 std::string format(const Settings& settings);
 
 // $XDG_CONFIG_HOME/ttt2/display.ini (only an absolute XDG_CONFIG_HOME
-// counts, else ~/.config), as keyboard.ini.
+// counts, else ~/.config), as keyboard.ini; %APPDATA%\ttt2\display.ini on
+// Windows.
 std::filesystem::path file_path();
 
 struct Loaded {

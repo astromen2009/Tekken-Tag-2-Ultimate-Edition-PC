@@ -6,6 +6,7 @@
 #include "cafe/vfs.h"
 
 #include "host/audio.h"
+#include "host/platform.h"
 #include "host/window.h"
 #include "install.h"
 #include "title/presentation.h"
@@ -38,11 +39,17 @@ void usage(const char* argv0) {
                  "  FOLDER (chosen in a dialog when not given) and adds it to the\n"
                  "  application menu; --update copies this executable into the\n"
                  "  install after a rebuild. Saves go to $TTT2_SAVE_DIR, default\n"
+#ifdef _WIN32
+                 "  %%APPDATA%%\\ttt2\\save. Fullscreen, the resolution and 120 fps\n"
+                 "  come from %%APPDATA%%\\ttt2\\display.ini (the launcher's\n"
+                 "  Settings write it), read when the game starts.\n"
+#else
                  "  ~/.local/share/ttt2/save. Fullscreen, the resolution and 120 fps\n"
                  "  come from $XDG_CONFIG_HOME/ttt2/display.ini (default\n"
                  "  ~/.config/ttt2/display.ini; the launcher's Settings write it),\n"
-                 "  read when the game starts. TTT2_FULLSCREEN, TTT2_SCALE and\n"
-                 "  TTT2_FPS win over it.\n",
+                 "  read when the game starts.\n"
+#endif
+                 "  TTT2_FULLSCREEN, TTT2_SCALE and TTT2_FPS win over it.\n",
                  argv0, argv0, argv0);
 }
 
@@ -92,8 +99,7 @@ int main(int argc, char** argv) {
     if (const char* save = std::getenv("TTT2_SAVE_DIR")) {
         vfs::set_save_root(save);
     } else {
-        const char* home = std::getenv("HOME");
-        vfs::set_save_root(std::filesystem::path(home ? home : ".") / ".local/share/ttt2/save");
+        vfs::set_save_root(host::save_directory());
     }
     const auto rpx = vfs::read_whole("/vol/code/Tekken.rpx");
     if (!rpx) fatal("the game source has no code/Tekken.rpx");

@@ -51,6 +51,7 @@ add_library(cafe_runtime OBJECT
     src/host/audio.cpp
     src/host/display_settings.cpp
     src/host/keymap.cpp
+    src/host/platform.cpp
     src/host/window.cpp
     src/gx2/cbpool.cpp
     src/gx2/display.cpp
@@ -70,9 +71,16 @@ target_compile_features(cafe_runtime PUBLIC cxx_std_20)
 find_package(Vulkan REQUIRED)
 find_package(SDL3 REQUIRED CONFIG)
 # GLSL -> SPIR-V at run time.
-find_library(SHADERC_LIBRARY NAMES shaderc_shared REQUIRED)
+find_library(SHADERC_LIBRARY NAMES shaderc_shared shaderc REQUIRED)
+find_path(SHADERC_INCLUDE_DIR shaderc/shaderc.h REQUIRED)
+target_include_directories(cafe_runtime SYSTEM PRIVATE ${SHADERC_INCLUDE_DIR})
+find_package(Threads REQUIRED)
 target_link_libraries(cafe_runtime PUBLIC cafe_rpx cafe_title OpenSSL::Crypto ZArchive::zarchive amd_addrlib cafe_latte
-    Vulkan::Vulkan SDL3::SDL3 ${SHADERC_LIBRARY})
+    Vulkan::Vulkan SDL3::SDL3 ${SHADERC_LIBRARY} Threads::Threads)
+if(WIN32)
+    # Start menu shortcuts (install.cpp).
+    target_link_libraries(cafe_runtime PUBLIC ole32 uuid shell32)
+endif()
 # Vulkan structures are initialised with only their sType.
 target_compile_options(cafe_runtime PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)
 
@@ -102,5 +110,6 @@ target_compile_features(cafe_latte PUBLIC cxx_std_20)
 target_compile_options(cafe_latte PRIVATE -Wall -Wextra -Wpedantic)
 
 add_executable(cafe-shader src/latte/cafe_shader_main.cpp)
+target_include_directories(cafe-shader SYSTEM PRIVATE ${SHADERC_INCLUDE_DIR})
 target_link_libraries(cafe-shader PRIVATE cafe_latte ${SHADERC_LIBRARY})
 target_compile_options(cafe-shader PRIVATE -Wall -Wextra -Wpedantic)
