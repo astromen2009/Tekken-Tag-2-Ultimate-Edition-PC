@@ -16,7 +16,8 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_OUT = os.path.join(os.path.expanduser('~/.local/share'), 'ttt2', 'tekken7', 'movesets')
+DEFAULT_OUT = os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'ttt2', 'tekken7', 'movesets') \
+    if os.name == 'nt' else os.path.join(os.path.expanduser('~/.local/share'), 'ttt2', 'tekken7', 'movesets')
 
 
 def main():

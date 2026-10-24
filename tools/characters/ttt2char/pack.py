@@ -74,6 +74,8 @@ def place(k):
 def default_folder():
     if os.environ.get('TTT2_CHARACTERS'):
         return os.environ['TTT2_CHARACTERS']
+    if os.name == 'nt':                     # (%APPDATA%\ttt2\characters, as the port reads them on Windows)
+        return os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'ttt2', 'characters')
     data = os.environ.get('XDG_DATA_HOME') or os.path.join(os.path.expanduser('~'), '.local', 'share')
     return os.path.join(data, 'ttt2', 'characters')
 

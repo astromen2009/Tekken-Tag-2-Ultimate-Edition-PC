@@ -17,6 +17,8 @@ the helper has the game read them with its own file reader (the one its loading 
 and they are saved under their pak paths in a folder of their own (FILES) that the importer reads them from.
 No menu, key or screen is involved, so the player's key bindings, settings, language or pop-ups do not matter.
 Nothing is written into the game's files, its saves or its prefix (but the helper's copy at C:\\t7helper.exe).
+On Windows the game runs as it is, minimised (WindowsSession): no Proton, gamescope or silent output; Steam is found
+in the registry, the helper runs from where it is, and $TTT2_TEKKEN7 may name the game's folder.
 A session ends what it started and nothing else (Session.close; also on the SIGTERM of the launcher's Cancel, see
 signals.py): a Tekken 7 the player starts from Steam meanwhile goes on, and what a killed importer left running is
 ended by the next session. Steam from Flatpak or Snap is found, but Tekken 7 is not run through it (not supported
@@ -25,7 +27,6 @@ yet).
 Written for this project (no third-party code).
 """
 import atexit
-import fcntl
 import hashlib
 import os
 import re
@@ -40,6 +41,10 @@ import time
 from .. import signals
 from .pak import plain
 
+WINDOWS = os.name == 'nt'
+if not WINDOWS:
+    import fcntl
+
 APP_ID = 389730
 GAME_COMM = 'TekkenGame-Win6'                 # the game's Linux process name (15 characters)
 SINK = 'ttt2_tekken7_silent'
@@ -53,11 +58,16 @@ DLC = {36: 592370, 43: 592373, 44: 592374, 45: 878460, 46: 878461, 47: 878462, 4
        51: 1114561, 52: 1162600, 53: 1162601, 54: 1236500, 55: 1289451, 56: 1289453}
 RECORD_MOVELIST = 0x68                          # a fighter record's command list: written last, once all is loaded
 COMMON_ANIMATIONS = 0x38
-# the movesets saved from the game, and the encrypted files as the game reads them (pak paths below it)
-MOVESETS = os.path.join(os.path.expanduser('~/.local/share'), 'ttt2', 'tekken7', 'movesets')
-FILES = os.path.join(os.path.expanduser('~/.local/share'), 'ttt2', 'tekken7', 'files')
-# the helper's build and its run's logs: $XDG_CACHE_HOME/ttt2 as the game's and the launcher's caches
-CACHE = os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'ttt2', 'tekken7')
+# the movesets saved from the game, and the encrypted files as the game reads them (pak paths below it); on Windows
+# in %APPDATA%\ttt2 as the port's own files
+DATA = os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'ttt2') if WINDOWS else \
+    os.path.join(os.path.expanduser('~/.local/share'), 'ttt2')
+MOVESETS = os.path.join(DATA, 'tekken7', 'movesets')
+FILES = os.path.join(DATA, 'tekken7', 'files')
+# the helper's build and its run's logs: $XDG_CACHE_HOME/ttt2 as the game's and the launcher's caches (Windows:
+# %LOCALAPPDATA%\ttt2)
+CACHE = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'ttt2', 'tekken7') if WINDOWS else \
+    os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'ttt2', 'tekken7')
 FILE_BATCH = 64                                 # files the game reads at once (the helper takes up to 256) ...
 FILE_BATCH_BYTES = 96 << 20                     # ... and their size together, in the game's memory meanwhile
 
@@ -108,9 +118,28 @@ def _libraries(steam, sandbox=None):
     return list(dict.fromkeys(out))
 
 
+def _windows_steam():
+    """Steam's folder as its installer recorded it in the registry, or None."""
+    import winreg
+    for root, key, value in ((winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam', 'SteamPath'),
+                             (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Valve\Steam', 'InstallPath'),
+                             (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Valve\Steam', 'InstallPath')):
+        try:
+            with winreg.OpenKey(root, key) as k:
+                path = os.path.normpath(winreg.QueryValueEx(k, value)[0])
+        except OSError:
+            continue
+        if os.path.isdir(path):
+            return path
+    return None
+
+
 def steams():
     """[(Steam's folder, None | 'flatpak' | 'snap')] of the Steams installed, in STEAMS' order (one entry per
-    folder: ~/.steam/steam usually links to ~/.local/share/Steam)."""
+    folder: ~/.steam/steam usually links to ~/.local/share/Steam). Windows: the registry's."""
+    if WINDOWS:
+        steam = _windows_steam()
+        return [(steam, None)] if steam else []
     out, seen = [], set()
     for path, sandbox in STEAMS:
         path = os.path.expanduser(path)
@@ -124,7 +153,8 @@ def _tekken7_library():
     """(Steam's folder, its sandbox (None, 'flatpak', 'snap'), the library Tekken 7 is installed in, its folder)."""
     found = steams()
     if not found:
-        raise DumpError('Steam is not installed (no ~/.local/share/Steam, nor Steam from Flatpak or Snap)')
+        raise DumpError('Steam is not installed' if WINDOWS else
+                        'Steam is not installed (no ~/.local/share/Steam, nor Steam from Flatpak or Snap)')
     for steam, sandbox in found:
         for lib in _libraries(steam, sandbox):
             acf = os.path.join(lib, 'steamapps', 'appmanifest_%d.acf' % APP_ID)
@@ -153,7 +183,18 @@ def tekken7_steam():
 
 
 def find_tekken7():
-    """Tekken 7's install, its Proton prefix and the Proton it uses, through Steam's files."""
+    """Tekken 7's install, its Proton prefix and the Proton it uses, through Steam's files. Windows: the install
+    ($TTT2_TEKKEN7, else Steam's), no prefix nor Proton."""
+    if WINDOWS:
+        game = os.environ.get('TTT2_TEKKEN7')
+        if game:
+            found = steams()
+            steam = found[0][0] if found else None
+        else:
+            steam, _, _, game = _tekken7_library()
+        if not os.path.isfile(os.path.join(game, 'TEKKEN 7.exe')):
+            raise DumpError('%s holds no TEKKEN 7.exe: choose the folder Tekken 7 is installed in' % game)
+        return Tekken7(steam, game, None, None)
     steam, sandbox, lib, game = _tekken7_library()
     if sandbox:
         # (its Proton and its prefix are made for the sandbox, and the sandboxed Steam would have to answer a game
@@ -171,7 +212,44 @@ def find_tekken7():
     return Tekken7(steam, game, prefix, proton)
 
 
+def _windows_processes():
+    """{pid: executable name, in lower case} of the processes running (Windows)."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Entry(ctypes.Structure):
+        _fields_ = [('dwSize', wintypes.DWORD), ('cntUsage', wintypes.DWORD), ('th32ProcessID', wintypes.DWORD),
+                    ('th32DefaultHeapID', ctypes.c_void_p), ('th32ModuleID', wintypes.DWORD),
+                    ('cntThreads', wintypes.DWORD), ('th32ParentProcessID', wintypes.DWORD),
+                    ('pcPriClassBase', ctypes.c_long), ('dwFlags', wintypes.DWORD),
+                    ('szExeFile', ctypes.c_wchar * 260)]
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    snapshot = kernel.CreateToolhelp32Snapshot(2, 0)            # TH32CS_SNAPPROCESS
+    out = {}
+    if snapshot in (None, wintypes.HANDLE(-1).value):
+        return out
+    entry = Entry()
+    entry.dwSize = ctypes.sizeof(Entry)
+    more = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
+    while more:
+        out[entry.th32ProcessID] = entry.szExeFile.lower()
+        more = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+    kernel.CloseHandle(snapshot)
+    return out
+
+
+WINDOWS_GAME = 'tekkengame-win64-shipping.exe'     # the game itself (TEKKEN 7.exe starts it)
+WINDOWS_LAUNCHER = 'tekken 7.exe'
+
+
+def _windows_game_pids():
+    return [pid for pid, name in _windows_processes().items() if name in (WINDOWS_GAME, WINDOWS_LAUNCHER)]
+
+
 def _running(comm):
+    if WINDOWS:
+        return next((pid for pid, name in _windows_processes().items() if name == comm + '.exe'), None)
     for pid in os.listdir('/proc'):
         if pid.isdigit():
             try:
@@ -366,26 +444,38 @@ SESSION_TAG = 'TTT2_T7_SESSION'     # in the environment of all a session starts
 
 def _lock_path(prefix):
     """The prefix's lock file: the same for every importer run, whatever its cache folder (in XDG_RUNTIME_DIR, the
-    user's own folder for such files)."""
+    user's own folder for such files; Windows: the user's temporary folder, for the game's folder)."""
     folder = os.environ.get('XDG_RUNTIME_DIR')
     if not folder or not os.path.isdir(folder):
         folder = tempfile.gettempdir()
     name = hashlib.sha1(os.path.realpath(prefix).encode('utf-8', 'surrogateescape')).hexdigest()[:16]
-    return os.path.join(folder, 'ttt2-tekken7-%d-%s.lock' % (os.getuid(), name))
+    user = os.environ.get('USERNAME', 'user') if WINDOWS else os.getuid()
+    return os.path.join(folder, 'ttt2-tekken7-%s-%s.lock' % (user, name))
 
 
 def _lock(path, timeout=300):
     """The prefix's lock, waited for: one session at a time (a session's end stops what it started in the prefix,
     and the launcher's check of the DLC must not end an import's session). Never a link's target (it may be in
     /tmp); not passed on to what the session starts, so it is free again as soon as this program has ended."""
-    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-    f = os.fdopen(fd, 'w')
+    if WINDOWS:
+        import msvcrt
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOINHERIT, 0o600)
+        f = os.fdopen(fd, 'w')
+
+        def take():
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        f = os.fdopen(fd, 'w')
+
+        def take():
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
     end = time.time() + timeout
     while True:
         try:
-            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            take()
             return f
-        except BlockingIOError:
+        except OSError:                     # (BlockingIOError; msvcrt's EDEADLOCK)
             if time.time() > end:
                 f.close()
                 raise DumpError('%s for %d s: try again when it is done' % (BUSY, timeout))
@@ -475,7 +565,10 @@ def _players(prefix, processes):
 
 
 def tekken7_running(t7):
-    """Whether the player's own Tekken 7 runs (or is being started): a session would share its prefix."""
+    """Whether the player's own Tekken 7 runs (or is being started): a session would share its prefix (Windows:
+    the session would find it as its game)."""
+    if WINDOWS:
+        return bool(_windows_game_pids())
     return bool(_players(t7.prefix, _processes()))
 
 
@@ -670,6 +763,112 @@ class Session:
                     self.lock.close()
 
 
+class WindowsSession:
+    """Session on Windows: the game itself (minimised: Windows has no hidden display) and the helper next to it, or
+    the helper alone. close() ends what it started; its pids are in <run>/session.pids meanwhile, so that a program
+    that stopped this one (the importer's window, on Cancel) can end them too."""
+
+    def __init__(self, t7, helper_exe, run, with_game):
+        self.t7, self.run, self.closed = t7, run, False
+        self.lock = self.helper = self.helper_process = self.launcher = None
+        self.game_pid = None
+        _open.append(self)
+        try:
+            self._start(helper_exe, with_game)
+        except BaseException:
+            self.close()
+            raise
+
+    def _record(self):
+        pids = [p for p in (self.launcher and self.launcher.pid, self.game_pid,
+                            self.helper_process and self.helper_process.pid) if p]
+        with open(os.path.join(self.run, 'session.pids'), 'w') as f:
+            f.write(' '.join(str(p) for p in pids) + '\n')
+
+    def _start(self, helper_exe, with_game):
+        t7, run = self.t7, self.run
+        os.makedirs(run, exist_ok=True)
+        self.lock = _lock(_lock_path(t7.game))
+        end_recorded(run)                                   # (what a stopped importer left running)
+        if _windows_game_pids():
+            raise DumpError(RUNNING)
+        self.before = set(_windows_processes())
+        self.port, self.secret = _free_port(), secrets.token_hex(16)
+        game_env = dict(os.environ, SteamAppId=str(APP_ID), SteamGameId=str(APP_ID))
+        # (without the game's app id when the game runs: Steam would count the helper as the game)
+        helper_env = {k: v for k, v in game_env.items() if k not in ('SteamAppId', 'SteamGameId')} if with_game \
+            else game_env
+        no_window = subprocess.CREATE_NO_WINDOW
+        if with_game:
+            startup = subprocess.STARTUPINFO()
+            startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup.wShowWindow = 7                         # SW_SHOWMINNOACTIVE
+            with open(os.path.join(run, 'game.log'), 'w') as log:
+                self.launcher = subprocess.Popen([os.path.join(t7.game, 'TEKKEN 7.exe')], cwd=t7.game, env=game_env,
+                                                 startupinfo=startup, stdout=log, stderr=subprocess.STDOUT)
+        with open(os.path.join(run, 'helper.log'), 'w') as log:
+            self.helper_process = subprocess.Popen([helper_exe, 'serve', str(self.port), self.secret],
+                                                   cwd=os.path.dirname(helper_exe), env=helper_env, stdout=log,
+                                                   stderr=subprocess.STDOUT, creationflags=no_window)
+        self._record()
+
+    def wait_game(self, timeout=240):
+        end = time.time() + timeout
+        while time.time() < end:
+            for pid, name in _windows_processes().items():
+                if name == WINDOWS_GAME and pid not in self.before:
+                    self.game_pid = pid
+                    self._record()
+                    return pid
+            if self.launcher.poll() not in (None, 0):
+                raise DumpError('Tekken 7 did not start (see %s)' % self.run)
+            time.sleep(0.5)
+        raise DumpError('Tekken 7 did not start within %d s' % timeout)
+
+    def connect(self):
+        self.helper = Helper(self.port, self.secret)
+        return self.helper
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        with signals.deferred():
+            try:
+                if self.helper:
+                    self.helper.quit()
+                if self.lock is not None:
+                    end_recorded(self.run)
+            finally:
+                if self in _open:
+                    _open.remove(self)
+                if self.lock:
+                    self.lock.close()
+
+
+def end_recorded(run):
+    """Windows: ends the processes a session recorded in <run>/session.pids (the game it started, its launcher, the
+    helper), and forgets them."""
+    path = os.path.join(run, 'session.pids')
+    try:
+        pids = [int(p) for p in _text(path).split()]
+    except (OSError, ValueError):
+        return
+    running = _windows_processes()
+    for pid in pids:
+        if running.get(pid) in (WINDOWS_GAME, WINDOWS_LAUNCHER, 't7helper.exe'):
+            subprocess.run(['taskkill', '/PID', str(pid), '/T', '/F'], capture_output=True,
+                           creationflags=subprocess.CREATE_NO_WINDOW)
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _session(t7, helper_exe, run, with_game):
+    return (WindowsSession if WINDOWS else Session)(t7, helper_exe, run, with_game)
+
+
 # ---------------------------------------------------------------- the encrypted files
 
 def encrypted_files(paks, code):
@@ -717,10 +916,11 @@ def owned_dlc(t7, helper_exe, run):
     """{DLC app id: owned} as the game asks Steam."""
     if tekken7_running(t7):                 # (Session checks again, once no other session runs)
         raise DumpError(RUNNING)
-    s = Session(t7, helper_exe, run, False)
+    s = _session(t7, helper_exe, run, False)
     try:
         h = s.connect()
-        return {a: owned for a, owned, _ in h.dlc('Z:' + os.path.join(t7.game, STEAMWORKS))}
+        dll = os.path.join(t7.game, STEAMWORKS)
+        return {a: owned for a, owned, _ in h.dlc(os.path.normpath(dll) if WINDOWS else 'Z:' + dll)}
     finally:
         s.close()
 
@@ -760,7 +960,7 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     cache = cache or CACHE
     run = os.path.join(cache, 'run')
     helper_exe = build_helper(cache)
-    log('Tekken 7: %s (Proton: %s)' % (t7.game, os.path.basename(t7.proton)))
+    log('Tekken 7: %s' % t7.game if WINDOWS else 'Tekken 7: %s (Proton: %s)' % (t7.game, os.path.basename(t7.proton)))
     owned = owned_dlc(t7, helper_exe, run)
     names = dict(fighters)
     if names:
@@ -775,8 +975,11 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     dumped = {}
     if not wanted and not files:
         return dumped, skipped
-    log('Starting Tekken 7 in the background (no window, no sound) ...')
-    s = Session(t7, helper_exe, run, True)
+    if WINDOWS:
+        log('Starting Tekken 7, minimised: leave it alone until the import closes it ...')
+    else:
+        log('Starting Tekken 7 in the background (no window, no sound) ...')
+    s = _session(t7, helper_exe, run, True)
     try:
         s.wait_game()
         h = s.connect()

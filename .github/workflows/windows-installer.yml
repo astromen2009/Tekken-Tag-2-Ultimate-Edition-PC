@@ -23,6 +23,8 @@ permissions:
 
 jobs:
   installer:
+    # (a release of TTT2 Fighters is windows-fighters.yml's)
+    if: github.event_name != 'release' || startsWith(github.ref, 'refs/tags/windows-v')
     runs-on: windows-latest
     defaults:
       run:

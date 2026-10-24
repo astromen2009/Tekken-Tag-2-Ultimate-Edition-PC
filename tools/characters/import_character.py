@@ -156,7 +156,8 @@ def add(args, fighters, progress):
     # only fighters the player owns, whichever movesets are already saved (DLC fighters: as Steam tells)
     ids = [importer.definition(f).TEKKEN7_ID for f in fighters]
     if any(fid in autodump.DLC for fid in ids):
-        progress('step', 'dump', 'Asking Steam which DLC you own (a helper runs hidden in Tekken 7\'s Proton prefix)')
+        progress('step', 'dump', 'Asking Steam which DLC you own' + ('' if os.name == 'nt' else
+                                 ' (a helper runs hidden in Tekken 7\'s Proton prefix)'))
     try:
         skipped = autodump.unowned(ids)
     except autodump.DumpError as error:
@@ -186,10 +187,11 @@ def add(args, fighters, progress):
     if importer.HEIHACHI not in have:                       # (every import needs his)
         needed[importer.HEIHACHI] = ('hei', 'Heihachi')
     if needed or files:
-        print('Saving %d Tekken 7 moveset(s) and %d fighter(s)\' encrypted files first (Tekken 7 runs hidden in the '
-              'background for a minute or two) ...' % (len(needed), len(files)))
-        progress('step', 'dump', 'Saving what Tekken 7 has only while it runs (it runs hidden in the background for a '
-                 'minute or two)')
+        how = ('Tekken 7 runs minimised for a minute or two: leave it alone' if os.name == 'nt' else
+               'Tekken 7 runs hidden in the background for a minute or two')
+        print('Saving %d Tekken 7 moveset(s) and %d fighter(s)\' encrypted files first (%s) ...'
+              % (len(needed), len(files), how))
+        progress('step', 'dump', 'Saving what Tekken 7 has only while it runs (%s)' % how)
         try:
             _, skipped = autodump.dump(needed, movesets, files=files, paks=paks)
         except autodump.DumpError as error:
