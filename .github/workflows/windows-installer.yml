@@ -2,14 +2,21 @@
 # (windows/CMakeLists.txt) built in MSYS2's CLANG64 environment with its
 # toolchain, checked outside MSYS2, packed with Inno Setup. A tag
 # windows-v<version> publishes it as a release; any other run keeps it as
-# the run's artifact. Nothing of the game is built or shipped here.
+# the run's artifact. A release published on GitHub with such a tag gets
+# the installer attached. Nothing of the game is built or shipped here.
 name: Windows installer
 
 on:
   push:
     tags: ["windows-v*"]
     branches: [windows-port]
+  release:
+    types: [published]
   workflow_dispatch:
+
+# A tag pushed with its release fires twice: one build per tag.
+concurrency:
+  group: windows-installer-${{ github.ref }}
 
 permissions:
   contents: write
