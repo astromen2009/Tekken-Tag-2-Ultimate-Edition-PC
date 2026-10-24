@@ -120,6 +120,18 @@ The Vulkan driver itself comes with the GPU's driver (AMD, NVIDIA, Intel).
 The launcher (below) is Linux's alone: on Windows the game is built with the
 commands of the next section and installed with `ttt2.exe --install`.
 
+## Windows installer
+
+On Windows the easiest way is the installer from the
+[Releases](../../releases) page, `TTT2-Setup-Windows-<version>.exe`: it asks
+for your `.wua` and an install folder, builds the game program for your PC
+from the archive with the compiler it carries (the game's code cannot be
+shipped, only translated on your PC), and installs the game with a Start
+menu shortcut. It needs no MSYS2 and no administrator rights; building
+takes some minutes, about 1.5 GB of free space and 4 GB of memory or more.
+`windows/` holds its sources and `.github/workflows/windows-installer.yml`
+builds it; a tag `windows-v<version>` publishes a release.
+
 ## Building
 
 ```bash
