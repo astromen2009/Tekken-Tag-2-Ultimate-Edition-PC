@@ -1,0 +1,87 @@
+# The Windows installer, TTT2-Setup-Windows-<version>.exe: the kit
+# (windows/CMakeLists.txt) built in MSYS2's CLANG64 environment with its
+# toolchain, checked outside MSYS2, packed with Inno Setup. A tag
+# windows-v<version> publishes it as a release; any other run keeps it as
+# the run's artifact. Nothing of the game is built or shipped here.
+name: Windows installer
+
+on:
+  push:
+    tags: ["windows-v*"]
+    branches: [windows-port]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: git pacman-contrib
+          pacboy: >-
+            toolchain:p cmake:p ninja:p python:p sdl3:p shaderc:p vulkan-headers:p
+            vulkan-loader:p openssl:p zstd:p zlib:p
+
+      - name: Dependencies
+        run: python tools/setup_deps.py
+
+      - name: Build the kit and the tests
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --target ttt2_windows_kit wua_extract cafe-recomp title_test wua_layers_test memory_model_test keymap_test display_settings_test
+
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure -R "^(title_test|wua_layers_test|memory_model_test|keymap_test|display_settings_test)$"
+
+      - name: Toolchain
+        run: bash windows/package_toolchain.sh build/windows-kit
+
+      # The kit as the player has it: no MSYS2 on PATH.
+      - name: Check the kit outside MSYS2
+        shell: pwsh
+        run: |
+          $env:PATH = "C:\Windows\System32;C:\Windows"
+          & build\windows-kit\ttt2-setup.exe --check
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Version
+        id: version
+        run: |
+          version=$(sed -n 's/^version = //p' build/windows-kit/kit.ini)
+          if [[ "$GITHUB_REF" == refs/tags/windows-v* ]]; then version="${GITHUB_REF#refs/tags/windows-v}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DKitDir=$PWD\build\windows-kit" "/DAppVersion=${{ steps.version.outputs.version }}" "/DOutputDir=$PWD\dist" windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TTT2-Setup-Windows
+          path: dist/*.exe
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/windows-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          name: Tekken Tag Tournament 2 Ultimate Edition ${{ steps.version.outputs.version }} - Windows
+          body_path: windows/RELEASE.md

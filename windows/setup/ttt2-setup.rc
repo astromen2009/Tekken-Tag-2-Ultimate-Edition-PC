@@ -1,0 +1,4 @@
+// The installer's manifest (ttt2-setup.manifest).
+#include <winuser.h>
+
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "ttt2-setup.manifest"

@@ -87,4 +87,8 @@ endif()
 # is built and installed with the commands in README.md.
 if(NOT WIN32)
     add_subdirectory(launcher)
+else()
+    # Windows' own: the installer that builds the game program on the
+    # player's PC (windows/).
+    add_subdirectory(windows)
 endif()
