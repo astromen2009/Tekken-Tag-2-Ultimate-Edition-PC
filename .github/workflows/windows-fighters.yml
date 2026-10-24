@@ -44,10 +44,7 @@ jobs:
         run: python -m pip install pyinstaller numpy pillow
 
       - name: The importer's Windows parts
-        working-directory: tools/characters
-        run: |
-          python -c "from ttt2char.tekken7 import autodump as a; print('steam:', a.steams()); print('processes:', len(a._windows_processes())); print('running:', a.tekken7_running(None))"
-          python -m unittest tests.test_formats tests.test_packs -v
+        run: python windows/fighters/ci_check.py
 
       - name: Freeze
         run: >-
