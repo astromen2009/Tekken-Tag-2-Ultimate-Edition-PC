@@ -80,12 +80,20 @@ def default_folder():
     return os.path.join(data, 'ttt2', 'characters')
 
 
+def _inside(path, folder):
+    """Whether `path` is `folder` or in it (never across Windows' drives)."""
+    try:
+        return os.path.commonpath([path, folder]) == folder
+    except ValueError:
+        return False
+
+
 def output_folder(folder):
     """Where packs go (`folder`, else default_folder()); never a folder of the repository that git would commit."""
     folder = os.path.abspath(os.path.expanduser(folder or default_folder()))
     real = os.path.realpath(folder)       # through symbolic links, which could lead into the repository
     # (installed, in <prefix>/share/ttt2/characters as in the AppImage, the importer is in no repository)
-    if os.path.exists(os.path.join(REPOSITORY, '.git')) and os.path.commonpath([real, REPOSITORY]) == REPOSITORY \
+    if os.path.exists(os.path.join(REPOSITORY, '.git')) and _inside(real, REPOSITORY) \
             and not git_ignores(real):
         raise InputError('the pack would go into the repository (%s): packs hold Namco\'s assets and must stay out '
                          'of it; leave out --out (the default is %s)' % (folder, default_folder()))
