@@ -593,7 +593,8 @@ def _owner_alive(tag):
     return fields is not None and fields[19] == started.partition('.')[0]
 
 
-def _kill(pids, sig=signal.SIGKILL):
+def _kill(pids, sig=None):
+    sig = signal.SIGKILL if sig is None else sig        # (Linux's: Windows has no SIGKILL)
     for pid in pids:
         try:
             os.kill(pid, sig)
