@@ -33,7 +33,7 @@ CHLOE = mock.Mock(CODE='dnc', NAME='Lucky Chloe', DONOR='jun', SEX='female')
 
 def write(path, text=''):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8', newline='') as f:     # (the bytes as given, on Windows too)
         f.write(text)
 
 
@@ -48,7 +48,7 @@ def old_kazumi(folder):
 
 
 def files_in(folder):
-    return sorted(os.path.relpath(os.path.join(top, name), folder) for top, _, names in os.walk(folder)
+    return sorted(os.path.relpath(os.path.join(top, name), folder).replace(os.sep, '/') for top, _, names in os.walk(folder)
                   for name in names)
 
 
@@ -152,7 +152,7 @@ class Reimport(unittest.TestCase):
             target = pack.write(d, KAZUMI, {'.nud': b'new', 'art/portrait_l.nut': b'new', 'colours.json': b'{}'},
                                 slot)
             self.assertEqual(files_in(target), ['art/portrait_l.nut', 'character.ini', 'colours.json', 'kzm.nud'])
-            with open(os.path.join(target, 'kzm.nud')) as f:
+            with open(os.path.join(target, 'kzm.nud'), encoding='utf-8') as f:
                 self.assertEqual(f.read(), 'new')
             self.assertEqual(sorted(os.listdir(d)), ['dnc', 'kzm'])  # (no working folder left)
             self.assertEqual({p['code']: (p['slot'], p['current']) for p in pack.installed(d)},

@@ -38,7 +38,7 @@ def palettes(archives, fighters):
         path = os.path.join(folder, 'colours.json')
         if not os.path.isfile(path):
             continue
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             mine = {int(nn): v for nn, v in json.load(f).items()}
         entries = [{}, {}]
         for nn, (rgb1, rgb2) in sorted(mine.items()):
