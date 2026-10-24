@@ -27,7 +27,7 @@ string(REGEX REPLACE ".* ([0-9.]+)\\)" "\\1" TTT2_WINDOWS_VERSION "${version_lin
 set(TTT2_WINDOWS_VERSION ${TTT2_WINDOWS_VERSION} PARENT_SCOPE)
 # The libraries the game program links by name, as MSYS2's CLANG64 packages
 # (and so the kit's toolchain) have them.
-set(TTT2_WINDOWS_LIBRARIES "-lSDL3 -lvulkan-1 -lshaderc_shared -lcrypto -lz -lzstd -lpthread -lole32 -luuid -lshell32"
+set(TTT2_WINDOWS_LIBRARIES "-lSDL3 -lvulkan-1 -lshaderc_shared -lcrypto -lz -lzstd -lpthread -lole32 -luuid -lshell32 -lwinmm"
     CACHE STRING "Windows kit: the libraries the game program links")
 
 # main.cpp and the runtime's objects in the archive the program is linked

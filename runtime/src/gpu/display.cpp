@@ -6,6 +6,7 @@
 // what GX2GetSwapStatus reports; titles pace their main loops on them.
 
 #include "gpu/gpu.h"
+#include "host/platform.h"
 #include "os/kernel.h"
 
 #include <algorithm>
@@ -59,7 +60,7 @@ void display_main() {
     auto next = std::chrono::steady_clock::now();
     for (;;) {
         next += kRefreshPeriod;
-        std::this_thread::sleep_until(next);
+        host::sleep_until(next);
         // The host display's blanks stand in while they come.
         if (steady_ns() - g_last_host_vsync.load() < 2 * kRefreshPeriod.count()) {
             next = std::chrono::steady_clock::now();

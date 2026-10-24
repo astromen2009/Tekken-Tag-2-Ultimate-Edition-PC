@@ -410,7 +410,7 @@ void execute_packet(uint32_t opcode, uint32_t payload, uint32_t count, uint32_t 
         if (!(arg(0) & (1u << 4))) break; // register space: nothing to wait for
         const uint32_t target = arg(1) & ~3u;
         while (!compare(function, rd32(target) & arg(4), arg(3))) {
-            std::this_thread::sleep_for(std::chrono::microseconds(20));
+            cafe::host::sleep_for(std::chrono::microseconds(20));
         }
         break;
     }

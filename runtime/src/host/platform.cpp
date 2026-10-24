@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <string>
+#include <thread>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -14,6 +15,7 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
+#include <timeapi.h>
 #else
 #include <pthread.h>
 #include <unistd.h>
@@ -154,6 +156,36 @@ fs::path executable_path() {
 
 fs::path readable_executable() { return executable_path(); }
 
+void init_timing() { timeBeginPeriod(1); }
+
+void sleep_until(std::chrono::steady_clock::time_point time) {
+    using namespace std::chrono;
+    // A high-resolution waitable timer (Windows 10 1803 and later) wakes
+    // within a fraction of a millisecond; else the 1 ms system timer.
+    thread_local const HANDLE timer = [] {
+        HANDLE t = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        return t ? t : CreateWaitableTimerExW(nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+    }();
+    thread_local const nanoseconds slack = [] {
+        HANDLE t = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        if (t) CloseHandle(t);
+        return t ? nanoseconds(microseconds(700)) : nanoseconds(milliseconds(2));
+    }();
+    for (;;) {
+        const auto left = time - steady_clock::now();
+        if (left <= steady_clock::duration::zero()) return;
+        if (left > slack && timer) {
+            LARGE_INTEGER due;
+            due.QuadPart = -static_cast<LONGLONG>(duration_cast<nanoseconds>(left - slack).count() / 100);
+            if (SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE)) {
+                WaitForSingleObject(timer, INFINITE);
+                continue;
+            }
+        }
+        std::this_thread::yield();
+    }
+}
+
 void set_thread_name(const char* name) {
     // SetThreadDescription (Windows 10 1607 and later), looked up so older
     // systems still start.
@@ -251,6 +283,10 @@ fs::path executable_path() {
 }
 
 fs::path readable_executable() { return "/proc/self/exe"; }
+
+void init_timing() {}
+
+void sleep_until(std::chrono::steady_clock::time_point time) { std::this_thread::sleep_until(time); }
 
 void set_thread_name(const char* name) { pthread_setname_np(pthread_self(), name); }
 

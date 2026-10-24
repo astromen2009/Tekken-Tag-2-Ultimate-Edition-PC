@@ -481,7 +481,7 @@ void Renderer::present_timed(float reported_hz) {
         }
         if (f.time == 0) f.time = now_seconds(); // queued while presenting every refresh: now
         const double wait = f.time - now_seconds();
-        if (wait > 0) std::this_thread::sleep_for(std::chrono::duration<double>(std::min(wait, 0.1)));
+        if (wait > 0) host::sleep_for(std::chrono::duration<double>(std::min(wait, 0.1)));
         present_image(f.image, f.ready);
         note_presentation(f.time, now_seconds());
         {
@@ -771,7 +771,7 @@ void Renderer::present_every_refresh(float reported_hz) {
                 std::lock_guard lock(present_mutex_);
                 drain();
             }
-            std::this_thread::sleep_for(std::chrono::duration<double>(period));
+            host::sleep_for(std::chrono::duration<double>(period));
         }
 
         // The display's own rate, from presents waited for one after the

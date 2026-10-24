@@ -78,8 +78,8 @@ find_package(Threads REQUIRED)
 target_link_libraries(cafe_runtime PUBLIC cafe_rpx cafe_title OpenSSL::Crypto ZArchive::zarchive amd_addrlib cafe_latte
     Vulkan::Vulkan SDL3::SDL3 ${SHADERC_LIBRARY} Threads::Threads)
 if(WIN32)
-    # Start menu shortcuts (install.cpp).
-    target_link_libraries(cafe_runtime PUBLIC ole32 uuid shell32)
+    # Start menu shortcuts (install.cpp), the 1 ms system timer (host/platform.cpp).
+    target_link_libraries(cafe_runtime PUBLIC ole32 uuid shell32 winmm)
 endif()
 # Vulkan structures are initialised with only their sType.
 target_compile_options(cafe_runtime PRIVATE -Wall -Wextra -Wpedantic -Wno-missing-field-initializers)

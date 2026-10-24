@@ -29,6 +29,7 @@
 #include "cafe/export.h"
 #include "cafe/sysmem.h"
 #include "host/audio.h"
+#include "host/platform.h"
 
 #include <algorithm>
 #include <chrono>
@@ -305,7 +306,7 @@ void wait_for_frame(std::chrono::steady_clock::time_point& next) {
         }
     }
     next += std::chrono::duration_cast<std::chrono::steady_clock::duration>(period);
-    std::this_thread::sleep_until(next);
+    host::sleep_until(next);
     // Running far behind (debugger, heavy load): skip, don't burst.
     if (std::chrono::steady_clock::now() - next > kFramePeriod * 10) next = std::chrono::steady_clock::now();
 }

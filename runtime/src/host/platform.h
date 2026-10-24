@@ -4,6 +4,7 @@
 // Windows): files by descriptor with positioned reads and writes, where the
 // port keeps its files, and the running executable.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -54,6 +55,20 @@ std::filesystem::path readable_executable();
 
 // A path as UTF-8 text (what SDL takes, and what the port prints).
 std::string utf8(const std::filesystem::path& path);
+
+// ---------------------------------------------------------------- time
+// Waits as precise as Linux's: Windows' timer otherwise ends sleeps on its
+// 15.6 ms ticks, which the GPU's polls (20 us), the sound mixer's 3 ms
+// frames and the frame pacing cannot have. init_timing (at start-up) sets
+// the system timer to 1 ms; sleep_until waits on a high-resolution timer and
+// spins the last fraction of a millisecond. Linux: std::this_thread's.
+void init_timing();
+void sleep_until(std::chrono::steady_clock::time_point time);
+template <typename Rep, typename Period>
+void sleep_for(std::chrono::duration<Rep, Period> duration) {
+    sleep_until(std::chrono::steady_clock::now() +
+                std::chrono::duration_cast<std::chrono::steady_clock::duration>(duration));
+}
 
 // The calling thread's name, for debuggers and profilers.
 void set_thread_name(const char* name);
