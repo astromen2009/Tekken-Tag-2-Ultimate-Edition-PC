@@ -15,8 +15,13 @@
 //   ttt2-setup.exe [GAME [FOLDER]] [--keep-work]
 //                              (GAME may be the install folder itself: an
 //                              update rebuilds the program from it, without
-//                              the .wua; %APPDATA%\ttt2\setup.ini then says
+//                              the .wua; <install>\data\setup.ini then says
 //                              which kit built it)
+//   --folder FOLDER            where to install, when only the .wua is
+//                              asked for (the launcher's Install the game)
+//
+// The build's work folder is the kit's (<kit>\work): nothing goes to the
+// system drive unless the kit is installed there.
 //   ttt2-setup.exe --check     compiles and links the kit's stub of the
 //                              generated code into a program that starts:
 //                              the kit works on this PC (no game needed)
@@ -429,7 +434,22 @@ void link(const Kit& kit, const std::vector<fs::path>& sources, const fs::path& 
     }
 }
 
-// Where the last install went (runtime/src/install.cpp records it).
+// The folder `ttt2 --install FOLDER` installs into (runtime/src/install.cpp's
+// install_folder): FOLDER when it is new, empty or an install already, else
+// a folder of the port's own inside it.
+fs::path install_target(const fs::path& folder) {
+    std::error_code ec;
+    const auto usable = [&](const fs::path& f) {
+        return !fs::exists(f, ec) ||
+               (fs::is_directory(f, ec) && (fs::exists(f / ".ttt2-install", ec) || fs::exists(f / ".ttt2-installing", ec) ||
+                                            fs::is_empty(f, ec)));
+    };
+    const fs::path full = fs::absolute(folder, ec).lexically_normal();
+    return usable(full) ? full : full / "Tekken Tag Tournament 2";
+}
+
+// Where an earlier version's last install went (%APPDATA%\ttt2\installed):
+// only where the folder dialog starts.
 std::optional<fs::path> installed_folder() {
     std::ifstream in(known_folder(FOLDERID_RoamingAppData) / "ttt2" / "installed");
     std::string text;
@@ -440,7 +460,7 @@ std::optional<fs::path> installed_folder() {
 // --check: the kit's toolchain compiles, links and starts a program made of
 // the runtime and the generated code's stub.
 int check(const Kit& kit) {
-    const fs::path work = known_folder(FOLDERID_LocalAppData) / "ttt2" / "setup-check";
+    const fs::path work = kit.folder / "check";
     std::error_code ec;
     fs::remove_all(work, ec);
     fs::create_directories(work / "generated");
@@ -467,6 +487,14 @@ int run(const std::vector<std::wstring>& args) {
         if (arg == L"--keep-work") keep_work = true;
         else if (arg == L"--check") checking = g_quiet = true;
         else positional.push_back(arg);
+    }
+    std::optional<fs::path> preset_folder;
+    for (size_t i = 0; i + 1 < positional.size(); ++i) {
+        if (positional[i] == L"--folder") {
+            preset_folder = fs::path(positional[i + 1]);
+            positional.erase(positional.begin() + static_cast<std::ptrdiff_t>(i), positional.begin() + static_cast<std::ptrdiff_t>(i) + 2);
+            break;
+        }
     }
 
     const Kit kit = load_kit();
@@ -507,6 +535,8 @@ int run(const std::vector<std::wstring>& args) {
 
     if (positional.size() >= 2) {
         folder = positional[1];
+    } else if (preset_folder) {
+        folder = *preset_folder;
     } else {
         fs::path start = known_folder(FOLDERID_Profile);
         if (const auto previous = installed_folder()) start = previous->parent_path();
@@ -516,8 +546,9 @@ int run(const std::vector<std::wstring>& args) {
         folder = *chosen;
     }
 
-    const fs::path work = known_folder(FOLDERID_LocalAppData) / "ttt2" / "setup-work";
+    const fs::path work = kit.folder / "work";
     fs::create_directories(work);
+    const fs::path target = install_target(folder);
     std::error_code ec;
     const fs::space_info space = fs::space(work, ec);
     if (!ec && space.available < kWorkBytes) {
@@ -567,13 +598,14 @@ int run(const std::vector<std::wstring>& args) {
     // What built the installed program, for the launcher's updates (windows/launcher): the kit's version and the
     // game it was built from.
     {
-        std::ofstream out(known_folder(FOLDERID_RoamingAppData) / "ttt2" / "setup.ini", std::ios::binary);
+        fs::create_directories(target / "data", ec);
+        std::ofstream out(target / "data" / "setup.ini", std::ios::binary);
         out << "built = " << (kit.values.count("version") ? kit.values.at("version") : "") << '\n'
             << "game = " << narrow(fs::absolute(game).wstring()) << '\n';
     }
 
-    const std::optional<fs::path> installed = installed_folder();
-    const fs::path executable = installed ? *installed / "Tekken Tag Tournament 2.exe" : fs::path();
+    const std::optional<fs::path> installed = target;
+    const fs::path executable = target / "Tekken Tag Tournament 2.exe";
     const std::wstring done =
         format(tr(L"Tekken Tag Tournament 2 is installed%ls%ls.\n\nIt is in the Start menu. Play now?",
                   L"Tekken Tag Tournament 2 está instalado%ls%ls.\n\nLo tienes en el menú Inicio. ¿Jugar ahora?"),

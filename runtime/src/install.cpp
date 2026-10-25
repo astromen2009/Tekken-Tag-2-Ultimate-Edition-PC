@@ -574,12 +574,46 @@ void install_launcher(const fs::path& folder) {
 
 #endif
 
+#ifdef _WIN32
+// The install's own data folder (host/portable.h): what the port writes stays
+// beside it. Made with what earlier versions kept in %APPDATA%\ttt2 (saves,
+// settings, added fighters), copied, not moved: those stay as they were.
+void make_data_folder(const fs::path& folder) {
+    const fs::path data = folder / "data";
+    std::error_code ec;
+    if (fs::is_directory(data, ec)) return;
+    fs::create_directories(data, ec);
+    if (ec) fail("cannot create " + text(data) + ": " + ec.message());
+    const wchar_t* appdata = _wgetenv(L"APPDATA");
+    if (!appdata || !*appdata) return;
+    const fs::path old = fs::path(appdata) / "ttt2";
+    for (const char* name : {"save", "characters", "display.ini", "keyboard.ini"}) {
+        if (!fs::exists(old / name, ec)) continue;
+        fs::copy(old / name, data / name, fs::copy_options::recursive | fs::copy_options::skip_existing, ec);
+        if (ec) {
+            std::fprintf(stderr, "ttt2: warning: cannot copy %s into %s: %s\n", text(old / name).c_str(),
+                         text(data).c_str(), ec.message().c_str());
+            ec.clear();
+        } else {
+            std::fprintf(stderr, "ttt2: copied %s into %s\n", text(old / name).c_str(), text(data).c_str());
+        }
+    }
+}
+#endif
+
 void record(const fs::path& folder) {
     std::error_code ec;
-    fs::create_directories(config_file().parent_path(), ec);
-    std::ofstream out(config_file());
+#ifdef _WIN32
+    // (in the install's data folder: an executable started from it finds
+    // the install beside itself, and nothing goes to %APPDATA%)
+    const fs::path file = folder / "data" / "installed";
+#else
+    const fs::path file = config_file();
+#endif
+    fs::create_directories(file.parent_path(), ec);
+    std::ofstream out(file);
     out << text(folder) << '\n';
-    if (!out) fail("cannot write " + text(config_file()));
+    if (!out) fail("cannot write " + text(file));
 }
 
 std::optional<fs::path> recorded_folder() {
@@ -613,6 +647,9 @@ int install(const std::vector<std::string>& positional, bool launcher) {
     if (needed > available) fail("not enough free space in " + text(folder));
 
     fs::create_directories(folder / "game", ec);
+#ifdef _WIN32
+    if (!ec) make_data_folder(folder);
+#endif
     if (ec) fail("cannot create " + text(folder / "game") + ": " + ec.message());
     std::ofstream(folder / kStarted) << "an install of Tekken Tag Tournament 2 in progress\n";
     if (!fs::exists(folder / kStarted, ec)) fail("cannot write in " + text(folder));

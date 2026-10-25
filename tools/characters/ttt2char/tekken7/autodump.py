@@ -69,6 +69,8 @@ FILES = os.path.join(DATA, 'tekken7', 'files')
 # %LOCALAPPDATA%\ttt2)
 CACHE = os.path.join(os.environ.get('LOCALAPPDATA') or os.path.expanduser('~'), 'ttt2', 'tekken7') if WINDOWS else \
     os.path.join(os.environ.get('XDG_CACHE_HOME') or os.path.expanduser('~/.cache'), 'ttt2', 'tekken7')
+# ($TTT2_CACHE: another folder for them, as the Windows launcher gives the install's own data folder)
+CACHE = os.environ.get('TTT2_CACHE') or CACHE
 FILE_BATCH = 64                                 # files the game reads at once (the helper takes up to 256) ...
 FILE_BATCH_BYTES = 96 << 20                     # ... and their size together, in the game's memory meanwhile
 

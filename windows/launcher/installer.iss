@@ -18,7 +18,9 @@ AppVersion={#AppVersion}
 AppPublisher=Tekken Tag 2 Ultimate Edition (unofficial)
 DefaultDirName={localappdata}\Programs\TTT2 Ultimate Launcher
 DisableProgramGroupPage=yes
-DisableDirPage=yes
+; (asked: nothing need go to the system drive)
+DisableDirPage=no
+UsePreviousAppDir=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -48,7 +50,8 @@ en.WelcomeLabel2=This installs TTT2 Ultimate Launcher, the launcher of Tekken Ta
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [InstallDelete]
-Type: filesandordirs; Name: "{app}\*"
+; (the previous version's program; its settings, downloads and kit stay)
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Icons]
 Name: "{userprograms}\{cm:ShortcutName}"; Filename: "{app}\TTT2 Ultimate Launcher.exe"; WorkingDir: "{app}"
@@ -58,4 +61,7 @@ Name: "{userdesktop}\{cm:ShortcutName}"; Filename: "{app}\TTT2 Ultimate Launcher
 Filename: "{app}\TTT2 Ultimate Launcher.exe"; WorkingDir: "{app}"; Description: "{cm:Run}"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\ttt2\tekken7"
+; (what the launcher keeps beside itself: settings, downloads, the game installer's kit)
+Type: filesandordirs; Name: "{app}\downloads"
+Type: filesandordirs; Name: "{app}\tmp"
+Type: filesandordirs; Name: "{app}\kit"

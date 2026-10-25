@@ -19,7 +19,9 @@ AppVersion={#AppVersion}
 AppPublisher=Tekken Tag 2 Ultimate Edition (unofficial)
 DefaultDirName={localappdata}\Programs\TTT2 Installer
 DisableProgramGroupPage=yes
-DisableDirPage=yes
+; (asked: nothing need go to the system drive)
+DisableDirPage=no
+UsePreviousAppDir=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -60,5 +62,5 @@ Name: "{userprograms}\{cm:ShortcutName}"; Filename: "{app}\ttt2-setup.exe"; Work
 Filename: "{app}\ttt2-setup.exe"; WorkingDir: "{app}"; Description: "{cm:RunSetup}"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\ttt2\setup-work"
-Type: filesandordirs; Name: "{localappdata}\ttt2\setup-check"
+Type: filesandordirs; Name: "{app}\work"
+Type: filesandordirs; Name: "{app}\check"

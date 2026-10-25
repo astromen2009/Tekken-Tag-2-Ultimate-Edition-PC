@@ -39,7 +39,8 @@ bool stderr_is_terminal();
 // ---------------------------------------------------------------- places
 // Linux: $HOME, $XDG_CONFIG_HOME/ttt2, $XDG_DATA_HOME/ttt2, $XDG_CACHE_HOME/ttt2.
 // Windows: %USERPROFILE%, %APPDATA%\ttt2 (configuration and data) and
-// %LOCALAPPDATA%\ttt2 (cache).
+// %LOCALAPPDATA%\ttt2 (cache), or an install's own data folder beside the
+// executable, when it has one (host/portable.h: <data>, <data>\cache).
 std::filesystem::path home_directory();
 std::filesystem::path config_directory();
 std::filesystem::path data_directory();

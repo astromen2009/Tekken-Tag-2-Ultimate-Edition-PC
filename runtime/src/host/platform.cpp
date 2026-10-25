@@ -1,4 +1,5 @@
 #include "host/platform.h"
+#include "host/portable.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -128,7 +129,9 @@ fs::path home_directory() {
     return fs::path("C:\\");
 }
 
+// (An install's own data folder first: host/portable.h.)
 fs::path config_directory() {
+    if (fs::path portable = portable_data(); !portable.empty()) return portable;
     fs::path p = environment(L"APPDATA");
     return (p.empty() ? home_directory() / "AppData" / "Roaming" : p) / "ttt2";
 }
@@ -137,6 +140,7 @@ fs::path data_directory() { return config_directory(); }
 fs::path save_directory() { return data_directory() / "save"; }
 
 fs::path cache_directory() {
+    if (fs::path portable = portable_data(); !portable.empty()) return portable / "cache";
     fs::path p = environment(L"LOCALAPPDATA");
     return (p.empty() ? home_directory() / "AppData" / "Local" : p) / "ttt2";
 }

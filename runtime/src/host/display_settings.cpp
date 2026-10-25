@@ -4,6 +4,7 @@
 #ifdef _WIN32
 #include <wchar.h>
 #endif
+#include "host/portable.h"
 
 #include <algorithm>
 #include <array>
@@ -110,6 +111,7 @@ bool regular(const FileStat& st) { return S_ISREG(st.st_mode); }
 // ~/.config/ttt2), %APPDATA%\ttt2 on Windows.
 fs::path config_folder() {
 #ifdef _WIN32
+    if (fs::path portable = host::portable_data(); !portable.empty()) return portable;
     const wchar_t* appdata = _wgetenv(L"APPDATA");
     if (appdata && *appdata) return fs::path(appdata) / "ttt2";
     const wchar_t* profile = _wgetenv(L"USERPROFILE");

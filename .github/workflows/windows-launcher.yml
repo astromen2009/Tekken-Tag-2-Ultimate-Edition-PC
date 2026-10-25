@@ -57,10 +57,15 @@ jobs:
           # (what the launcher compares the releases with, and where it looks for them)
           printf 'version = %s\nrepository = %s\n' "$version" "$GITHUB_REPOSITORY" > launcher.ini
 
+      # (the importer's package importable here too: PyInstaller collects ttt2char's submodules, the fighters' among
+      # them, from what this Python finds; they are loaded by name, which its analysis cannot follow)
       - name: Freeze
+        env:
+          PYTHONPATH: tools/characters
         run: >-
           pyinstaller --noconfirm --windowed --name "TTT2 Ultimate Launcher"
           --paths tools/characters --hidden-import import_character --collect-submodules ttt2char
+          --hidden-import tkinter --collect-submodules PIL
           --add-binary "t7helper.exe;." --add-data "launcher.ini;." windows/launcher/ttt2_launcher.py
 
       - name: Check the frozen program
@@ -69,6 +74,10 @@ jobs:
           $out = & "dist\TTT2 Ultimate Launcher\TTT2 Ultimate Launcher.exe" --run-import --help 2>&1 | Out-String
           Write-Output $out
           if ($out -notmatch "usage: import_character") { exit 1 }
+          # everything it loads at some point, the fighters' definitions among them
+          $test = & "dist\TTT2 Ultimate Launcher\TTT2 Ultimate Launcher.exe" --self-test 2>&1 | Out-String
+          Write-Output $test
+          if ($test -notmatch "self-test: 17 fighters") { Write-Output "::error title=self-test::$test"; exit 1 }
 
       - name: Installer
         shell: pwsh
