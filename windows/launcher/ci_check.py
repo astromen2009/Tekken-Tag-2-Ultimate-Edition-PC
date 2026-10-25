@@ -2,7 +2,7 @@
 processes, and the format and pack tests. A failure is reported as a GitHub annotation (::error::) with its output, so
 that it shows on the run's page.
 
-    python windows/fighters/ci_check.py      (from the repository's root)
+    python windows/launcher/ci_check.py      (from the repository's root)
 """
 import io
 import os

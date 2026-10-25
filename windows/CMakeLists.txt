@@ -24,6 +24,11 @@ set(kit ${TTT2_WINDOWS_KIT_DIR})
 file(STRINGS ${CMAKE_SOURCE_DIR}/launcher/builder/CMakeLists.txt version_line
     REGEX "^set\\(TTT2_LAUNCHER_VERSION [0-9.]+\\)")
 string(REGEX REPLACE ".* ([0-9.]+)\\)" "\\1" TTT2_WINDOWS_VERSION "${version_line}")
+# A release's own version (its tag, windows-v<version>) wins: the launcher compares it with the releases'.
+set(TTT2_WINDOWS_RELEASE "" CACHE STRING "Windows kit: the release's version (default: the launcher's)")
+if(TTT2_WINDOWS_RELEASE)
+    set(TTT2_WINDOWS_VERSION ${TTT2_WINDOWS_RELEASE})
+endif()
 set(TTT2_WINDOWS_VERSION ${TTT2_WINDOWS_VERSION} PARENT_SCOPE)
 # The libraries the game program links by name, as MSYS2's CLANG64 packages
 # (and so the kit's toolchain) have them.

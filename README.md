@@ -132,6 +132,13 @@ takes some minutes, about 1.5 GB of free space and 4 GB of memory or more.
 `windows/` holds its sources and `.github/workflows/windows-installer.yml`
 builds it; a tag `windows-v<version>` publishes a release.
 
+`TTT2-Launcher-Windows-<version>.exe` (a tag `launcher-v<version>`,
+`windows/launcher/`) installs **TTT2 Ultimate Launcher**: Play; Update all,
+which installs the newest game installer from the releases and rebuilds the
+game program from the install folder (no `.wua` needed again); Install the
+game; and Tekken 7's fighters, from any folder holding your Tekken 7 (with
+Steam signed in to the account that bought it).
+
 ## Building
 
 ```bash

@@ -23,7 +23,7 @@ permissions:
 
 jobs:
   installer:
-    # (a release of TTT2 Fighters is windows-fighters.yml's)
+    # (a release of the launcher is windows-launcher.yml's)
     if: github.event_name != 'release' || startsWith(github.ref, 'refs/tags/windows-v')
     runs-on: windows-latest
     defaults:
@@ -44,9 +44,16 @@ jobs:
       - name: Dependencies
         run: python tools/setup_deps.py
 
+      - name: Version
+        id: version
+        run: |
+          version=$(sed -n 's/^set(TTT2_LAUNCHER_VERSION \([0-9.]*\))/\1/p' launcher/builder/CMakeLists.txt)
+          if [[ "$GITHUB_REF" == refs/tags/windows-v* ]]; then version="${GITHUB_REF#refs/tags/windows-v}"; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build the kit and the tests
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DTTT2_WINDOWS_RELEASE=${{ steps.version.outputs.version }}
           cmake --build build --target ttt2_windows_kit wua_extract cafe-recomp title_test wua_layers_test memory_model_test keymap_test display_settings_test
 
       - name: Tests
@@ -62,13 +69,6 @@ jobs:
           $env:PATH = "C:\Windows\System32;C:\Windows"
           & build\windows-kit\ttt2-setup.exe --check
           if ($LASTEXITCODE -ne 0) { exit 1 }
-
-      - name: Version
-        id: version
-        run: |
-          version=$(sed -n 's/^version = //p' build/windows-kit/kit.ini)
-          if [[ "$GITHUB_REF" == refs/tags/windows-v* ]]; then version="${GITHUB_REF#refs/tags/windows-v}"; fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Installer
         shell: pwsh

@@ -13,6 +13,10 @@
 //            adds the Start menu shortcut
 //
 //   ttt2-setup.exe [GAME [FOLDER]] [--keep-work]
+//                              (GAME may be the install folder itself: an
+//                              update rebuilds the program from it, without
+//                              the .wua; %APPDATA%\ttt2\setup.ini then says
+//                              which kit built it)
 //   ttt2-setup.exe --check     compiles and links the kit's stub of the
 //                              generated code into a program that starts:
 //                              the kit works on this PC (no game needed)
@@ -560,6 +564,13 @@ int run(const std::vector<std::wstring>& args) {
     }
     SetThreadExecutionState(ES_CONTINUOUS);
     if (!keep_work) fs::remove_all(work, ec);
+    // What built the installed program, for the launcher's updates (windows/launcher): the kit's version and the
+    // game it was built from.
+    {
+        std::ofstream out(known_folder(FOLDERID_RoamingAppData) / "ttt2" / "setup.ini", std::ios::binary);
+        out << "built = " << (kit.values.count("version") ? kit.values.at("version") : "") << '\n'
+            << "game = " << narrow(fs::absolute(game).wstring()) << '\n';
+    }
 
     const std::optional<fs::path> installed = installed_folder();
     const fs::path executable = installed ? *installed / "Tekken Tag Tournament 2.exe" : fs::path();
