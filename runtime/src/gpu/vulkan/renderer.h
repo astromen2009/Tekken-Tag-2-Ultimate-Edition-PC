@@ -45,6 +45,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct shaderc_compiler;
@@ -118,6 +119,7 @@ struct Texture {
 
 struct ShaderModule {
     VkShaderModule module = VK_NULL_HANDLE;
+    uint64_t spirv_key = 0; // its SPIR-V's in the disk cache (the GLSL's hash): the same from run to run
     latte::TranslatedShader info;
     bool failed = false;
 };
@@ -409,6 +411,14 @@ private:
     // ------------------------------------------------------ misc (renderer.cpp)
     void load_pipeline_cache();
     void save_pipeline_cache();
+    // The pipelines earlier runs used (<cache>/pipelines.list), created again
+    // in the background at start-up, before the title draws with them: a
+    // fighter or a stage seen before is ready when it first appears.
+    void prewarm_pipelines();
+    std::mutex prewarm_mutex_;
+    std::unordered_map<uint64_t, VkPipeline> prewarmed_;   // by their stable key's hash, until a draw takes one
+    std::unordered_set<uint64_t> recorded_;                  // in pipelines.list (or about to be)
+    std::vector<std::string> new_records_;                   // not written to it yet
     void capture();
     void save_image(const Image& image, const std::string& path);
     int64_t captured_frame_ = -1; // TTT2_CAPTURE: frame number and index of the last capture

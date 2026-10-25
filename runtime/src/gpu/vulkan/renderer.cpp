@@ -77,6 +77,7 @@ Renderer::Renderer() {
                  static_cast<double>(scale_));
     compiler_ = shaderc_compiler_initialize();
     load_pipeline_cache();
+    prewarm_pipelines();
     surface_ = host::create_vulkan_surface(ctx_.instance);
     init_interpolation();
     start_presenter();

@@ -12,6 +12,11 @@
 #include <shaderc/shaderc.h>
 
 #include <algorithm>
+#include <chrono>
+#include <mutex>
+#include <memory>
+#include <atomic>
+#include <thread>
 #include <bit>
 #include <cmath>
 #include <cstdio>
@@ -95,10 +100,8 @@ bool has_stencil(VkFormat f) {
     return f == VK_FORMAT_D24_UNORM_S8_UINT || f == VK_FORMAT_D32_SFLOAT_S8_UINT || f == VK_FORMAT_D16_UNORM_S8_UINT;
 }
 
-// Everything a pipeline bakes in; the rest is dynamic state.
-struct PipelineKey {
-    const ShaderModule* vs;
-    const ShaderModule* ps;
+// Everything a pipeline bakes in besides its shaders; the rest is dynamic state.
+struct PipelineState {
     VkFormat colors[8];
     VkFormat depth;
     uint32_t color_count;
@@ -108,6 +111,26 @@ struct PipelineKey {
     uint32_t topology_class;
     uint32_t depth_clamp;
 };
+
+struct PipelineKey {
+    const ShaderModule* vs;
+    const ShaderModule* ps;
+    PipelineState state;
+};
+
+// A pipeline by what stays the same from run to run: its shaders' SPIR-V
+// keys and what its layout and state are (pipelines.list holds these).
+struct StableKey {
+    uint64_t vs, ps;
+    uint32_t vs_textures, ps_textures;
+    uint32_t vs_registers, ps_registers;
+    PipelineState state;
+};
+constexpr char kPipelineListMagic[8] = {'T', 'T', '2', 'P', 'L', 'S', 'T', '1'};
+
+VkPipeline build_pipeline(VkDevice device, VkPipelineCache cache, const PipelineState& k, VkShaderModule vs,
+                          VkShaderModule ps, VkPipelineLayout layout);
+
 
 // ~/.cache/ttt2 (or $XDG_CACHE_HOME/ttt2; %LOCALAPPDATA%\ttt2 on Windows):
 // compiled shaders and pipelines.
@@ -181,6 +204,20 @@ void Renderer::load_pipeline_cache() {
 }
 
 void Renderer::save_pipeline_cache() {
+    // The new pipelines' stable keys, after the earlier runs' (pipelines.list).
+    std::vector<std::string> records;
+    {
+        std::lock_guard lock(prewarm_mutex_);
+        records.swap(new_records_);
+    }
+    if (!records.empty() && !cache_directory().empty()) {
+        const std::filesystem::path path = cache_directory() / "pipelines.list";
+        std::error_code ec;
+        const bool fresh = !std::filesystem::exists(path, ec) || std::filesystem::file_size(path, ec) == 0;
+        std::ofstream out(path, std::ios::binary | std::ios::app);
+        if (fresh) out.write(kPipelineListMagic, sizeof(kPipelineListMagic));
+        for (const std::string& r : records) out.write(r.data(), static_cast<std::streamsize>(r.size()));
+    }
     if (new_pipelines_ == 0 || cache_directory().empty()) return;
     new_pipelines_ = 0;
     size_t size = 0;
@@ -191,6 +228,80 @@ void Renderer::save_pipeline_cache() {
     std::ofstream(path.string() + ".tmp", std::ios::binary).write(data.data(), static_cast<std::streamsize>(size));
     std::error_code ec;
     std::filesystem::rename(path.string() + ".tmp", path, ec);
+}
+
+void Renderer::prewarm_pipelines() {
+    if (cache_directory().empty()) return;
+    std::ifstream in(cache_directory() / "pipelines.list", std::ios::binary);
+    char magic[sizeof(kPipelineListMagic)] = {};
+    if (!in.read(magic, sizeof(magic)) || std::memcmp(magic, kPipelineListMagic, sizeof(magic)) != 0) return;
+    std::vector<StableKey> keys;
+    std::vector<uint64_t> hashes;
+    for (StableKey k; in.read(reinterpret_cast<char*>(&k), sizeof(k));) {
+        const uint64_t h = fnv(&k, sizeof(k));
+        if (!recorded_.insert(h).second) continue;
+        keys.push_back(k);
+        hashes.push_back(h);
+    }
+    if (keys.empty()) return;
+    // The layouts here (the map is the draw thread's afterwards); the
+    // shaders' SPIR-V from the disk cache and the pipelines in threads of
+    // their own, while the title starts.
+    auto layouts = std::make_shared<std::vector<VkPipelineLayout>>();
+    for (const StableKey& k : keys) {
+        layouts->push_back(pipeline_layout(k.vs_textures, k.ps_textures, k.vs_registers != 0, k.ps_registers != 0));
+    }
+    struct Work {
+        std::vector<StableKey> keys;
+        std::vector<uint64_t> hashes;
+        std::atomic<size_t> next{0}, done{0};
+        std::mutex modules_mutex;
+        std::unordered_map<uint64_t, VkShaderModule> modules;
+        std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    };
+    auto work = std::make_shared<Work>();
+    work->keys = std::move(keys);
+    work->hashes = std::move(hashes);
+    const unsigned threads = std::clamp(std::thread::hardware_concurrency() / 2, 1u, 6u);
+    std::fprintf(stderr, "ttt2: GPU: making %zu pipelines of earlier runs ready (%u threads)\n", work->keys.size(), threads);
+    for (unsigned t = 0; t < threads; ++t) {
+        std::thread([this, work, layouts] {
+            host::set_thread_name("gpu prewarm");
+            const auto module = [&](uint64_t key) -> VkShaderModule {
+                {
+                    std::lock_guard lock(work->modules_mutex);
+                    if (auto it = work->modules.find(key); it != work->modules.end()) return it->second;
+                }
+                const std::vector<uint32_t> code = load_cached_spirv(key);
+                VkShaderModule m = VK_NULL_HANDLE;
+                if (!code.empty()) {
+                    VkShaderModuleCreateInfo mci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+                    mci.codeSize = code.size() * 4;
+                    mci.pCode = code.data();
+                    if (vkCreateShaderModule(ctx_.device, &mci, nullptr, &m) != VK_SUCCESS) m = VK_NULL_HANDLE;
+                }
+                std::lock_guard lock(work->modules_mutex);
+                auto [it, fresh] = work->modules.emplace(key, m);
+                if (!fresh && m != VK_NULL_HANDLE) vkDestroyShaderModule(ctx_.device, m, nullptr);
+                return it->second;
+            };
+            for (size_t i; (i = work->next++) < work->keys.size();) {
+                const StableKey& k = work->keys[i];
+                const VkShaderModule vs = module(k.vs), ps = module(k.ps);
+                if (vs != VK_NULL_HANDLE && ps != VK_NULL_HANDLE) {
+                    const VkPipeline p = build_pipeline(ctx_.device, pipeline_cache_, k.state, vs, ps, (*layouts)[i]);
+                    if (p != VK_NULL_HANDLE) {
+                        std::lock_guard lock(prewarm_mutex_);
+                        prewarmed_.emplace(work->hashes[i], p);
+                    }
+                }
+                if (++work->done == work->keys.size()) {
+                    std::fprintf(stderr, "ttt2: GPU: %zu pipelines ready in %.1f s\n", work->keys.size(),
+                                 std::chrono::duration<double>(std::chrono::steady_clock::now() - work->start).count());
+                }
+            }
+        }).detach();
+    }
 }
 
 // ---------------------------------------------------------------- shaders
@@ -248,6 +359,7 @@ const ShaderModule* Renderer::shader(Stage stage, uint32_t address, uint32_t siz
     }
     // SPIR-V is cached on disk by the GLSL it came from.
     const uint64_t glsl_hash = fnv(entry->info.glsl.data(), entry->info.glsl.size());
+    entry->spirv_key = glsl_hash;
     std::vector<uint32_t> spirv = load_cached_spirv(glsl_hash);
     if (spirv.empty()) {
         shaderc_compile_options_t options = shaderc_compile_options_initialize();
@@ -312,54 +424,25 @@ VkPipelineLayout Renderer::pipeline_layout(uint32_t vs_textures, uint32_t ps_tex
     return layout;
 }
 
-const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,
-                                   const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class) {
-    PipelineKey k;
-    std::memset(&k, 0, sizeof(k));
-    k.vs = vs;
-    k.ps = ps;
-    k.color_count = color_count;
-    k.depth = depth;
-    const uint32_t color_control = regs[reg::CB_COLOR_CONTROL];
-    const uint32_t blend_enable = (color_control >> 8) & 0xFF;
-    const bool per_mrt = (color_control >> 7) & 1;
-    k.write_mask = regs[reg::CB_TARGET_MASK];
-    for (uint32_t i = 0; i < color_count; ++i) {
-        k.colors[i] = colors[i];
-        if (colors[i] == VK_FORMAT_UNDEFINED) continue;
-        if ((blend_enable >> i) & 1 && !is_integer(colors[i])) {
-            k.blend[i] = (regs[reg::CB_BLEND0_CONTROL + (per_mrt ? i * 4 : 0)] & 0x7FFFFFFF) | 0x80000000u;
-        }
-    }
-    const uint32_t mode = regs[reg::PA_SU_SC_MODE_CNTL];
-    if ((mode >> 3) & 3) k.polygon_mode = (mode >> 5) & 7; // front polygon type: 0 points, 1 lines, 2 fill
-    else k.polygon_mode = 2;
-    k.topology_class = topology_class;
-    const uint32_t clip = regs[reg::PA_CL_CLIP_CNTL];
-    k.depth_clamp = ((clip >> 26) & 3) == 3; // ZCLIP_NEAR/FAR_DISABLE
-    if ((color_control >> 16 & 0xFF) != 0xCC) report_once("unsupported ROP3", (color_control >> 16) & 0xFF);
+namespace {
 
-    const uint64_t key = fnv(&k, sizeof(k));
-    auto& entry = pipelines_[key];
-    if (entry) return entry->pipeline ? entry.get() : nullptr;
-    entry = std::make_unique<Pipeline>();
-    entry->vs = vs;
-    entry->ps = ps;
-    entry->layout = pipeline_layout(vs->info.texture_mask, ps->info.texture_mask, vs->info.uses_registers,
-                                    ps->info.uses_registers);
-
+// A graphics pipeline of the state and shaders (Renderer::pipeline, and the
+// start-up's prewarm threads: Vulkan creates pipelines from any thread, and
+// the pipeline cache is synchronised internally). VK_NULL_HANDLE on failure.
+VkPipeline build_pipeline(VkDevice device, VkPipelineCache cache, const PipelineState& k, VkShaderModule vs,
+                          VkShaderModule ps, VkPipelineLayout layout) {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-    stages[0].module = vs->module;
+    stages[0].module = vs;
     stages[0].pName = "main";
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = ps->module;
+    stages[1].module = ps;
     stages[1].pName = "main";
     VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    ia.topology = topology_class == 0 ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
-                  : topology_class == 1 ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+    ia.topology = k.topology_class == 0 ? VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+                  : k.topology_class == 1 ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
                                         : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
     vp.viewportCount = 1;
@@ -372,9 +455,9 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
     VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     VkPipelineColorBlendAttachmentState attachments[8]{};
-    for (uint32_t i = 0; i < color_count; ++i) {
+    for (uint32_t i = 0; i < k.color_count; ++i) {
         VkPipelineColorBlendAttachmentState& a = attachments[i];
-        a.colorWriteMask = colors[i] == VK_FORMAT_UNDEFINED ? 0 : (k.write_mask >> (4 * i)) & 0xF;
+        a.colorWriteMask = k.colors[i] == VK_FORMAT_UNDEFINED ? 0 : (k.write_mask >> (4 * i)) & 0xF;
         if (k.blend[i]) {
             const uint32_t b = k.blend[i];
             a.blendEnable = VK_TRUE;
@@ -393,7 +476,7 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
         }
     }
     VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cb.attachmentCount = color_count;
+    cb.attachmentCount = k.color_count;
     cb.pAttachments = attachments;
     static const VkDynamicState kDynamic[] = {
         VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_LINE_WIDTH, VK_DYNAMIC_STATE_DEPTH_BIAS,
@@ -408,10 +491,10 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
     dyn.dynamicStateCount = static_cast<uint32_t>(std::size(kDynamic));
     dyn.pDynamicStates = kDynamic;
     VkPipelineRenderingCreateInfo ri{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    ri.colorAttachmentCount = color_count;
-    ri.pColorAttachmentFormats = colors;
-    ri.depthAttachmentFormat = depth;
-    ri.stencilAttachmentFormat = has_stencil(depth) ? depth : VK_FORMAT_UNDEFINED;
+    ri.colorAttachmentCount = k.color_count;
+    ri.pColorAttachmentFormats = k.colors;
+    ri.depthAttachmentFormat = k.depth;
+    ri.stencilAttachmentFormat = has_stencil(k.depth) ? k.depth : VK_FORMAT_UNDEFINED;
     VkGraphicsPipelineCreateInfo gci{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     gci.pNext = &ri;
     gci.stageCount = 2;
@@ -424,13 +507,86 @@ const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs
     gci.pDepthStencilState = &ds;
     gci.pColorBlendState = &cb;
     gci.pDynamicState = &dyn;
-    gci.layout = entry->layout;
-    const VkResult r = vkCreateGraphicsPipelines(ctx_.device, pipeline_cache_, 1, &gci, nullptr, &entry->pipeline);
-    ++new_pipelines_;
+    gci.layout = layout;
+    VkPipeline pipeline = VK_NULL_HANDLE;
+    const VkResult r = vkCreateGraphicsPipelines(device, cache, 1, &gci, nullptr, &pipeline);
     if (r != VK_SUCCESS) {
         std::fprintf(stderr, "ttt2: gpu: pipeline creation failed (%d)\n", static_cast<int>(r));
-        entry->pipeline = VK_NULL_HANDLE;
-        return nullptr;
+        return VK_NULL_HANDLE;
+    }
+    return pipeline;
+}
+
+StableKey stable_key(const PipelineKey& k) {
+    StableKey s;
+    std::memset(&s, 0, sizeof(s));
+    s.vs = k.vs->spirv_key;
+    s.ps = k.ps->spirv_key;
+    s.vs_textures = k.vs->info.texture_mask;
+    s.ps_textures = k.ps->info.texture_mask;
+    s.vs_registers = k.vs->info.uses_registers;
+    s.ps_registers = k.ps->info.uses_registers;
+    s.state = k.state;
+    return s;
+}
+
+} // namespace
+
+const Pipeline* Renderer::pipeline(const Registers& regs, const ShaderModule* vs, const ShaderModule* ps,
+                                   const VkFormat* colors, uint32_t color_count, VkFormat depth, uint32_t topology_class) {
+    PipelineKey k;
+    std::memset(&k, 0, sizeof(k));
+    k.vs = vs;
+    k.ps = ps;
+    k.state.color_count = color_count;
+    k.state.depth = depth;
+    const uint32_t color_control = regs[reg::CB_COLOR_CONTROL];
+    const uint32_t blend_enable = (color_control >> 8) & 0xFF;
+    const bool per_mrt = (color_control >> 7) & 1;
+    k.state.write_mask = regs[reg::CB_TARGET_MASK];
+    for (uint32_t i = 0; i < color_count; ++i) {
+        k.state.colors[i] = colors[i];
+        if (colors[i] == VK_FORMAT_UNDEFINED) continue;
+        if ((blend_enable >> i) & 1 && !is_integer(colors[i])) {
+            k.state.blend[i] = (regs[reg::CB_BLEND0_CONTROL + (per_mrt ? i * 4 : 0)] & 0x7FFFFFFF) | 0x80000000u;
+        }
+    }
+    const uint32_t mode = regs[reg::PA_SU_SC_MODE_CNTL];
+    if ((mode >> 3) & 3) k.state.polygon_mode = (mode >> 5) & 7; // front polygon type: 0 points, 1 lines, 2 fill
+    else k.state.polygon_mode = 2;
+    k.state.topology_class = topology_class;
+    const uint32_t clip = regs[reg::PA_CL_CLIP_CNTL];
+    k.state.depth_clamp = ((clip >> 26) & 3) == 3; // ZCLIP_NEAR/FAR_DISABLE
+    if ((color_control >> 16 & 0xFF) != 0xCC) report_once("unsupported ROP3", (color_control >> 16) & 0xFF);
+
+    const uint64_t key = fnv(&k, sizeof(k));
+    auto& entry = pipelines_[key];
+    if (entry) return entry->pipeline ? entry.get() : nullptr;
+    entry = std::make_unique<Pipeline>();
+    entry->vs = vs;
+    entry->ps = ps;
+    entry->layout = pipeline_layout(vs->info.texture_mask, ps->info.texture_mask, vs->info.uses_registers,
+                                    ps->info.uses_registers);
+
+    // A pipeline the start-up made again from an earlier run's list, else a new one (listed for the next run).
+    const StableKey stable = stable_key(k);
+    const uint64_t stable_hash = fnv(&stable, sizeof(stable));
+    {
+        std::lock_guard lock(prewarm_mutex_);
+        if (auto it = prewarmed_.find(stable_hash); it != prewarmed_.end()) {
+            entry->pipeline = it->second;
+            prewarmed_.erase(it);
+            return entry.get();
+        }
+    }
+    entry->pipeline = build_pipeline(ctx_.device, pipeline_cache_, k.state, vs->module, ps->module, entry->layout);
+    ++new_pipelines_;
+    if (entry->pipeline == VK_NULL_HANDLE) return nullptr;
+    if (vs->spirv_key && ps->spirv_key) {
+        std::lock_guard lock(prewarm_mutex_);
+        if (recorded_.insert(stable_hash).second) {
+            new_records_.emplace_back(reinterpret_cast<const char*>(&stable), sizeof(stable));
+        }
     }
     return entry.get();
 }
