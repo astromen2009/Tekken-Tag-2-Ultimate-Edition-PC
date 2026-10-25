@@ -27,6 +27,7 @@ yet).
 Written for this project (no third-party code).
 """
 import atexit
+import glob
 import hashlib
 import os
 import re
@@ -182,18 +183,38 @@ def tekken7_steam():
         return found[0] if found else (None, None)
 
 
+def tekken7_folder(folder):
+    """The folder holding TEKKEN 7.exe: `folder`, or one up to two levels inside it (a copy kept in a folder of its
+    own); None when there is none."""
+    if not folder or not os.path.isdir(folder):
+        return None
+    for depth in range(3):
+        pattern = [folder] + ['*'] * depth + ['TEKKEN 7.exe']
+        found = sorted(glob.glob(os.path.join(*[glob.escape(pattern[0])] + pattern[1:])))
+        if found:
+            return os.path.dirname(found[0])
+    return None
+
+
+# (Windows: Steam is started when it is installed; it must be signed in to the account that bought the game)
+NO_STEAM = ('Steam is not running and could not be started: install Steam (store.steampowered.com) and sign in '
+            'with the account that bought Tekken 7, then try again') if WINDOWS else None
+
+
 def find_tekken7():
     """Tekken 7's install, its Proton prefix and the Proton it uses, through Steam's files. Windows: the install
     ($TTT2_TEKKEN7, else Steam's), no prefix nor Proton."""
     if WINDOWS:
-        game = os.environ.get('TTT2_TEKKEN7')
-        if game:
+        chosen = os.environ.get('TTT2_TEKKEN7')
+        if chosen:
             found = steams()
             steam = found[0][0] if found else None
+            game = tekken7_folder(chosen)
         else:
             steam, _, _, game = _tekken7_library()
-        if not os.path.isfile(os.path.join(game, 'TEKKEN 7.exe')):
-            raise DumpError('%s holds no TEKKEN 7.exe: choose the folder Tekken 7 is installed in' % game)
+            game = tekken7_folder(game)
+        if not game:
+            raise DumpError('%s holds no TEKKEN 7.exe: choose the folder Tekken 7 is installed in' % (chosen or 'Steam'))
         return Tekken7(steam, game, None, None)
     steam, sandbox, lib, game = _tekken7_library()
     if sandbox:
@@ -262,7 +283,22 @@ def _running(comm):
 
 
 def steam_running():
-    return _running('steam') is not None
+    """Whether Steam runs; on Windows it is started (minimised to the tray) when it is installed but not running,
+    and given time to sign in."""
+    if _running('steam') is not None:
+        return True
+    steam = _windows_steam() if WINDOWS else None
+    if not steam or not os.path.isfile(os.path.join(steam, 'steam.exe')):
+        return False
+    subprocess.Popen([os.path.join(steam, 'steam.exe'), '-silent'], cwd=steam,
+                     creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP)
+    end = time.time() + 90
+    while time.time() < end:
+        if _running('steam') is not None:
+            time.sleep(25)                  # (signing in, before the game or the helper asks it)
+            return True
+        time.sleep(1)
+    return False
 
 
 HELPER_SOURCE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 't7helper', 't7helper.c')
@@ -933,7 +969,7 @@ def unowned(fighters, cache=None):
     if not dlc:
         return {}
     if not steam_running():
-        raise DumpError('Steam is not running: start it, then try again (it tells which fighters you own)')
+        raise DumpError(NO_STEAM or 'Steam is not running: start it, then try again (it tells which fighters you own)')
     cache = cache or CACHE
     owned = owned_dlc(find_tekken7(), build_helper(cache), os.path.join(cache, 'run'))
     return {fid: 'its DLC is not owned' for fid in dlc if not owned.get(DLC[fid], False)}
@@ -954,7 +990,7 @@ def dump(fighters, out, log=print, cache=None, files=None, paks=None):
     of the fighters, as the game reads them, below paks.saved. -> ({id: path} dumped, {id: reason} skipped)."""
     from . import memdump                   # (numpy: the rest of this module works without it)
     if not steam_running():
-        raise DumpError('Steam is not running: start it, then try again (Tekken 7 needs it)')
+        raise DumpError(NO_STEAM or 'Steam is not running: start it, then try again (Tekken 7 needs it)')
     t7 = find_tekken7()
     if tekken7_running(t7):
         raise DumpError(RUNNING)

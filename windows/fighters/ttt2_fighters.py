@@ -33,6 +33,26 @@ def tr(english, spanish):
     return spanish if SPANISH else english
 
 
+# The importer's likeliest messages, in Spanish (by how they start).
+SPANISH_ERRORS = (
+    ('Steam is not running', 'Steam no está abierto y no se pudo abrir: instala Steam (store.steampowered.com) e inicia '
+                             'sesión con la cuenta con la que compraste Tekken 7, y vuelve a intentarlo.'),
+    ('Tekken 7 is running', 'Tekken 7 está abierto: ciérralo primero.'),
+    ('Tekken 7 did not start', 'Tekken 7 no arrancó. Comprueba que Steam está abierto con la sesión iniciada en la cuenta '
+                               'con la que lo compraste, y que el juego arranca desde Steam.'),
+    ('none of the fighters asked for is owned', 'Tu cuenta de Steam no tiene ninguno de los luchadores elegidos (son DLC).'),
+    ('the helper', 'El ayudante no pudo hablar con Tekken 7 (quizá un antivirus lo bloqueó, o es otra versión del juego).'),
+)
+
+
+def spanish(message):
+    if SPANISH:
+        for start, text in SPANISH_ERRORS:
+            if message.startswith(start):
+                return text + '\n\n(' + message + ')'
+    return message
+
+
 # ---------------------------------------------------------------- the import process
 
 def run_import(args):
@@ -66,12 +86,40 @@ def installed_game():
         return ''
 
 
+REMEMBERED = os.path.join(os.environ.get('APPDATA', ''), 'ttt2', 'tekken7', 'folder.txt')
+
+
 def found_tekken7():
+    """The Tekken 7 folder chosen last time, else Steam's, else ''."""
+    from ttt2char.tekken7 import autodump
     try:
-        from ttt2char.tekken7 import autodump
-        return autodump.tekken7_library()[2]
-    except Exception:           # (no Steam, no Tekken 7: the player chooses)
+        with open(REMEMBERED, encoding='utf-8') as f:
+            folder = autodump.tekken7_folder(f.readline().strip())
+        if folder:
+            return folder
+    except OSError:
+        pass
+    try:
+        return autodump.tekken7_folder(autodump.tekken7_library()[2]) or ''
+    except Exception:           # (no Steam library with it: the player chooses)
         return ''
+
+
+def remember_tekken7(folder):
+    try:
+        os.makedirs(os.path.dirname(REMEMBERED), exist_ok=True)
+        with open(REMEMBERED, 'w', encoding='utf-8') as f:
+            f.write(folder + '\n')
+    except OSError:
+        pass
+
+
+def steam_installed():
+    from ttt2char.tekken7 import autodump
+    try:
+        return bool(autodump._windows_steam())
+    except Exception:
+        return True             # (not Windows: the importer tells)
 
 
 # ---------------------------------------------------------------- the window
@@ -91,31 +139,46 @@ def window():
 
     ttk.Label(frame, wraplength=720, justify='left', text=tr(
         'Adds Tekken 7\'s fighters that Tekken Tag Tournament 2 lacks (Negan, Akuma, Kazumi...) from your own copies '
-        'of both games. Steam must be running; only the DLC fighters your account owns are added. Tekken 7 starts '
-        'minimised for a minute or two: leave it alone, the importer closes it. The packs hold Namco\'s assets: keep '
-        'them for yourself.',
+        'of both games. Choose the folder Tekken 7 is in and press Add fighters. Steam must be installed and signed in '
+        'to the account that bought Tekken 7 (it is started if it is closed); only the DLC fighters that account owns '
+        'are added. Tekken 7 starts minimised for a minute or two: leave it alone, the importer closes it. The packs '
+        'hold Namco\'s assets: keep them for yourself.',
         'Añade los luchadores de Tekken 7 que Tekken Tag Tournament 2 no tiene (Negan, Akuma, Kazumi...) a partir de '
-        'tus propias copias de ambos juegos. Steam tiene que estar abierto; solo se añaden los luchadores de DLC que '
-        'tu cuenta tiene. Tekken 7 se abrirá minimizado un minuto o dos: no lo toques, el importador lo cierra. Los '
-        'paquetes contienen material de Namco: son solo para ti.')).grid(row=0, column=0, columnspan=3, sticky='w')
+        'tus propias copias de ambos juegos. Elige la carpeta donde está Tekken 7 y pulsa Añadir luchadores. Steam '
+        'tiene que estar instalado y con la sesión iniciada en la cuenta con la que compraste Tekken 7 (se abre solo '
+        'si está cerrado); solo se añaden los luchadores de DLC que esa cuenta tiene. Tekken 7 se abrirá minimizado un '
+        'minuto o dos: no lo toques, el importador lo cierra. Los paquetes contienen material de Namco: son solo para '
+        'ti.')).grid(row=0, column=0, columnspan=3, sticky='w')
 
     game = tk.StringVar(value=installed_game())
     tekken7 = tk.StringVar(value=found_tekken7())
 
-    def folder_row(row, label, variable, title):
+    def folder_row(row, label, variable, title, resolve=None):
         ttk.Label(frame, text=label).grid(row=row, column=0, sticky='w', pady=(10, 0))
         ttk.Entry(frame, textvariable=variable).grid(row=row, column=1, sticky='ew', padx=6, pady=(10, 0))
 
         def browse():
             chosen = filedialog.askdirectory(title=title, initialdir=variable.get() or None, mustexist=True)
             if chosen:
-                variable.set(os.path.normpath(chosen))
+                chosen = os.path.normpath(chosen)
+                variable.set(resolve(chosen) if resolve else chosen)
         ttk.Button(frame, text=tr('Browse...', 'Examinar...'), command=browse).grid(row=row, column=2, pady=(10, 0))
 
     folder_row(1, tr('Tekken Tag Tournament 2 (its install folder):', 'Tekken Tag Tournament 2 (carpeta instalada):'),
                game, tr('The folder Tekken Tag Tournament 2 is installed in', 'La carpeta donde está instalado Tekken Tag Tournament 2'))
-    folder_row(2, tr('Tekken 7 (its folder in Steam):', 'Tekken 7 (su carpeta de Steam):'), tekken7,
-               tr('The folder of Tekken 7 (with TEKKEN 7.exe)', 'La carpeta de Tekken 7 (con TEKKEN 7.exe)'))
+    def resolve_tekken7(folder):
+        from ttt2char.tekken7 import autodump
+        found = autodump.tekken7_folder(folder)
+        if not found:
+            messagebox.showwarning('TTT2 Fighters', tr(
+                'There is no TEKKEN 7.exe in %s. Choose the folder you installed Tekken 7 in.',
+                'No hay ningún TEKKEN 7.exe en %s. Elige la carpeta donde instalaste Tekken 7.') % folder)
+            return folder
+        return found
+
+    folder_row(2, tr('Tekken 7 (its install folder):', 'Tekken 7 (su carpeta de instalación):'), tekken7,
+               tr('The folder of Tekken 7 (with TEKKEN 7.exe)', 'La carpeta de Tekken 7 (con TEKKEN 7.exe)'),
+               resolve_tekken7)
 
     box = ttk.LabelFrame(frame, text=tr('Fighters', 'Luchadores'), padding=8)
     box.grid(row=3, column=0, columnspan=3, sticky='ew', pady=(12, 0))
@@ -166,10 +229,22 @@ def window():
                 'Choose the folder Tekken Tag Tournament 2 is installed in (the one with "game" in it).',
                 'Elige la carpeta donde instalaste Tekken Tag Tournament 2 (la que tiene la carpeta "game").'))
             return
-        if not remove and not os.path.isfile(os.path.join(tekken7.get(), 'TEKKEN 7.exe')):
-            messagebox.showwarning('TTT2 Fighters', tr('Choose the folder of Tekken 7 (with TEKKEN 7.exe).',
-                                                       'Elige la carpeta de Tekken 7 (la que tiene TEKKEN 7.exe).'))
-            return
+        if not remove:
+            from ttt2char.tekken7 import autodump
+            folder = autodump.tekken7_folder(tekken7.get())
+            if not folder:
+                messagebox.showwarning('TTT2 Fighters', tr('Choose the folder of Tekken 7 (with TEKKEN 7.exe).',
+                                                           'Elige la carpeta de Tekken 7 (la que tiene TEKKEN 7.exe).'))
+                return
+            tekken7.set(folder)
+            remember_tekken7(folder)
+            if not steam_installed():
+                messagebox.showwarning('TTT2 Fighters', tr(
+                    'Tekken 7 needs Steam: install it (store.steampowered.com) and sign in with the account that bought '
+                    'Tekken 7. Nothing needs downloading again: the folder you chose is used as it is.',
+                    'Tekken 7 necesita Steam: instálalo (store.steampowered.com) e inicia sesión con la cuenta con la que '
+                    'compraste Tekken 7. No hace falta volver a descargar nada: se usa la carpeta que elegiste tal cual.'))
+                return
         args = names + ['--game', game.get(), '--progress'] + (['--remove'] if remove else ['--tekken7', tekken7.get()])
         command = ([sys.executable, '--run-import'] if FROZEN else [sys.executable, os.path.abspath(__file__),
                                                                     '--run-import']) + args
@@ -233,7 +308,7 @@ def window():
                 'Hecho. Abre Tekken Tag Tournament 2: los luchadores están en la pantalla de selección.'))
         else:
             status.set(tr('It failed.', 'Ha fallado.'))
-            messagebox.showerror('TTT2 Fighters', (failed[-1] if failed else tr(
+            messagebox.showerror('TTT2 Fighters', (spanish(failed[-1]) if failed else tr(
                 'The import failed: see the window\'s text.', 'La importación ha fallado: mira el texto de la ventana.')))
         added.clear()
         failed.clear()
