@@ -84,7 +84,9 @@ const Named& named(Resolution resolution) {
 
 std::string summary(const Settings& s) {
     return std::string("fullscreen ") + (s.fullscreen ? "yes" : "no") + ", resolution " +
-           std::string(name_of(s.resolution)) + ", interpolation " + (s.interpolation ? "yes" : "no");
+           std::string(name_of(s.resolution)) + ", interpolation " + (s.interpolation ? "yes" : "no") +
+           (s.frame_rate ? ", frame rate " + std::to_string(s.frame_rate) : std::string()) +
+           (s.anisotropy ? ", anisotropic " + std::to_string(s.anisotropy) : std::string());
 }
 
 bool set(const char* value) { return value != nullptr && *value != '\0'; }
@@ -164,8 +166,9 @@ std::pair<int, int> window_size(int desktop_width, int desktop_height, float den
 }
 
 Parsed parse(std::string_view text) {
-    enum Name : size_t { kFullscreen, kResolution, kInterpolation, kNames };
-    static constexpr std::array<std::string_view, kNames> kIds{"fullscreen", "resolution", "interpolation"};
+    enum Name : size_t { kFullscreen, kResolution, kInterpolation, kFrameRate, kAnisotropic, kNames };
+    static constexpr std::array<std::string_view, kNames> kIds{"fullscreen", "resolution", "interpolation",
+                                                               "frame_rate", "anisotropic"};
     Parsed parsed;
     std::array<size_t, kNames> set_on{}; // the line that gave each setting its value
     if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3); // a byte order mark from an editor
@@ -199,6 +202,22 @@ Parsed parse(std::string_view text) {
                 continue;
             }
             parsed.settings.resolution = *resolution;
+        } else if (which == kFrameRate || which == kAnisotropic) {
+            const bool rate = which == kFrameRate;
+            const std::string_view none = rate ? "auto" : "game";
+            unsigned number_value = 0;
+            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), number_value);
+            const bool numeric = error == std::errc{} && end == value.data() + value.size();
+            const bool allowed = rate ? (number_value == 60 || number_value == 120 || number_value == 180 ||
+                                         number_value == 240)
+                                      : (number_value == 2 || number_value == 4 || number_value == 8 ||
+                                         number_value == 16);
+            if (value != none && !(numeric && allowed)) {
+                parsed.warnings.push_back({number, std::string(id) + ": " + quoted(value) + " is not " +
+                                                       (rate ? "auto, 60, 120, 180 or 240" : "game, 2, 4, 8 or 16")});
+                continue;
+            }
+            (rate ? parsed.settings.frame_rate : parsed.settings.anisotropy) = value == none ? 0 : number_value;
         } else {
             const std::optional<bool> on = yes_no(value);
             if (!on) {
@@ -230,6 +249,12 @@ std::string format(const Settings& settings) {
             "  # auto, 1280x720, 1920x1080, 2560x1440, 3840x2160 or 5120x2880\n";
     text += std::string("interpolation = ") + (settings.interpolation ? "yes" : "no") +
             "  # yes: 120 frames per second on displays of 100 Hz and more\n";
+    if (settings.frame_rate != 0) {
+        text += "frame_rate = " + std::to_string(settings.frame_rate) + "  # auto, 60, 120, 180 or 240\n";
+    }
+    if (settings.anisotropy != 0) {
+        text += "anisotropic = " + std::to_string(settings.anisotropy) + "  # game, 2, 4, 8 or 16\n";
+    }
     return text;
 }
 
@@ -282,7 +307,9 @@ Loaded load(const fs::path& file) {
 
 Active resolve(const Settings& settings, const char* fullscreen, const char* scale, const char* fps,
                std::vector<std::string>& log) {
-    Active active{settings.fullscreen, scale_of(settings.resolution), settings.interpolation ? 0u : 60u};
+    Active active{settings.fullscreen, scale_of(settings.resolution),
+                  settings.frame_rate != 0 ? settings.frame_rate : settings.interpolation ? 0u : 60u,
+                  settings.anisotropy};
     if (set(fullscreen)) {
         active.fullscreen = std::string_view(fullscreen) == "1";
         log.push_back(std::string("display: TTT2_FULLSCREEN=") + fullscreen + ": " +

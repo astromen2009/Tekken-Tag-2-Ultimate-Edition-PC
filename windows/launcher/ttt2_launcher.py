@@ -183,6 +183,64 @@ def child_env(**extra):
     return env
 
 
+# ---------------------------------------------------------------- graphics (the game's display.ini)
+
+# The values runtime/src/host/display_settings.h reads, with what the window calls them.
+RESOLUTIONS = (('auto', ('Automatic (enough for your display)', 'Automática (la que cubre tu pantalla)')),
+               ('1280x720', ('1280x720 (1x, the original)', '1280x720 (1x, la original)')),
+               ('1920x1080', ('1920x1080 (1.5x)', '1920x1080 (1.5x)')),
+               ('2560x1440', ('2560x1440 (2x)', '2560x1440 (2x)')),
+               ('3840x2160', ('3840x2160 (3x, 4K)', '3840x2160 (3x, 4K)')),
+               ('5120x2880', ('5120x2880 (4x, 5K)', '5120x2880 (4x, 5K)')))
+FRAME_RATES = (('auto', ('Automatic (120 on displays of 100 Hz and more)', 'Automático (120 en pantallas de 100 Hz o más)')),
+               ('60', ('60 (the game\'s own, no interpolation)', '60 (el del juego, sin interpolación)')),
+               ('120', ('120', '120')), ('180', ('180', '180')), ('240', ('240', '240')))
+ANISOTROPY = (('game', ('As the game asks', 'El que pide el juego')), ('2', ('2x', '2x')), ('4', ('4x', '4x')),
+              ('8', ('8x', '8x')), ('16', ('16x', '16x')))
+
+
+def display_file(game):
+    return os.path.join(game, 'data', 'display.ini')
+
+
+def read_display(game):
+    """display.ini's settings, with the defaults for what it does not say."""
+    out = {'fullscreen': 'no', 'resolution': 'auto', 'interpolation': 'yes', 'frame_rate': 'auto', 'anisotropic': 'game'}
+    try:
+        with open(display_file(game), encoding='utf-8-sig', errors='replace') as f:
+            for text in f:
+                text = text.split(' #', 1)[0].split('\t#', 1)[0]
+                if text.lstrip().startswith('#'):
+                    continue
+                key, eq, value = text.partition('=')
+                if eq and key.strip() in out:
+                    out[key.strip()] = value.strip().lower()
+    except OSError:
+        pass
+    if out['interpolation'] == 'no' and out['frame_rate'] == 'auto':
+        out['frame_rate'] = '60'
+    return out
+
+
+def write_display(game, fullscreen, resolution, frame_rate, anisotropic):
+    """display.ini as the game's format() writes it (the last two only when set)."""
+    ensure_data(game)
+    lines = ["# Tekken Tag Tournament 2's display settings, written by the launcher's Settings.",
+             '# The game reads them when it starts.',
+             'fullscreen = %s  # yes or no (F11 switches in the game)' % ('yes' if fullscreen else 'no'),
+             'resolution = %s  # auto, 1280x720, 1920x1080, 2560x1440, 3840x2160 or 5120x2880' % resolution,
+             'interpolation = %s  # yes: 120 frames per second on displays of 100 Hz and more'
+             % ('no' if frame_rate == '60' else 'yes')]
+    if frame_rate not in ('auto', '60'):
+        lines.append('frame_rate = %s  # auto, 60, 120, 180 or 240' % frame_rate)
+    if anisotropic != 'game':
+        lines.append('anisotropic = %s  # game, 2, 4, 8 or 16' % anisotropic)
+    path = display_file(game)
+    with open(path + '.part', 'w', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(lines) + '\n')
+    os.replace(path + '.part', path)
+
+
 def kit_version():
     return read_ini(os.path.join(KIT, 'kit.ini')).get('version', '')
 
@@ -300,7 +358,7 @@ def window():
 
     root = tk.Tk()
     root.title('TTT2 Ultimate Launcher - Tekken Tag Tournament 2 Ultimate Edition')
-    root.minsize(760, 600)
+    root.minsize(760, 560)
     info = launcher_info()
     repository = info.get('repository') or DEFAULT_REPOSITORY
     events = queue.Queue()              # (what, value) from the background threads, handled in the window's
@@ -346,8 +404,10 @@ def window():
         ttk.Button(folders, text=tr('Browse...', 'Examinar...'), command=command).grid(row=row, column=2, pady=3)
 
     # ------------------------------------------------ the game
-    top = ttk.LabelFrame(root, text=tr('The game', 'El juego'), padding=10)
-    top.pack(fill='x', padx=12, pady=(10, 0))
+    tabs = ttk.Notebook(root)
+    tabs.pack(fill='both', expand=True, padx=12, pady=10)
+    top = ttk.Frame(tabs, padding=10)
+    tabs.add(top, text=tr('Game', 'Juego'))
     game_status = tk.StringVar()
     update_status = tk.StringVar(value=tr('Looking for updates...', 'Buscando actualizaciones...'))
     ttk.Label(top, textvariable=game_status, font=('Segoe UI', 10, 'bold'), wraplength=720,
@@ -358,6 +418,7 @@ def window():
     latest = {}
 
     def refresh_game():
+        load_graphics()
         folder = game_folder(game.get())
         built, kit = built_version(folder), kit_version()
         if folder:
@@ -507,9 +568,78 @@ def window():
             pass
         root.after(200, handle_events)
 
+    # ------------------------------------------------ graphics
+    graphics = ttk.Frame(tabs, padding=10)
+    tabs.add(graphics, text=tr('Graphics', 'Gráficos'))
+    graphics.columnconfigure(1, weight=1)
+    ttk.Label(graphics, wraplength=720, justify='left', text=tr(
+        'What the game draws with. They are saved in the game\'s folder (data\\display.ini) and apply the next time '
+        'it starts.',
+        'Cómo dibuja el juego. Se guardan en su carpeta (data\\display.ini) y se aplican la próxima vez que lo abras.')
+              ).grid(row=0, column=0, columnspan=2, sticky='w', pady=(0, 8))
+    labels = lambda options: [tr(*names) for _, names in options]   # noqa: E731
+    graphics_vars = {}
+
+    def combo(row, text, options, key):
+        ttk.Label(graphics, text=text).grid(row=row, column=0, sticky='w', pady=4, padx=(0, 10))
+        variable = tk.StringVar()
+        box = ttk.Combobox(graphics, textvariable=variable, values=labels(options), state='readonly', width=48)
+        box.grid(row=row, column=1, sticky='w', pady=4)
+        box.bind('<<ComboboxSelected>>', lambda event: save_graphics())
+        graphics_vars[key] = (variable, options)
+
+    combo(1, tr('Internal resolution:', 'Resolución interna:'), RESOLUTIONS, 'resolution')
+    combo(2, tr('Frames per second:', 'Fotogramas por segundo:'), FRAME_RATES, 'frame_rate')
+    combo(3, tr('Anisotropic filtering:', 'Filtrado anisotrópico:'), ANISOTROPY, 'anisotropic')
+    fullscreen_var = tk.BooleanVar()
+    ttk.Checkbutton(graphics, text=tr('Start fullscreen (F11 switches in the game)',
+                                      'Empezar a pantalla completa (F11 cambia dentro del juego)'),
+                    variable=fullscreen_var, command=lambda: save_graphics()).grid(row=4, column=0, columnspan=2,
+                                                                                   sticky='w', pady=(8, 4))
+    ttk.Label(graphics, wraplength=720, justify='left', foreground='#555', text=tr(
+        'Higher resolutions and frame rates need a faster GPU. More than 60 frames per second are made by blending '
+        'the game\'s frames (it still runs at 60); they need a display that refreshes that fast.',
+        'Las resoluciones y fotogramas más altos piden una GPU más potente. Más de 60 fotogramas por segundo se '
+        'consiguen mezclando los del juego (el juego sigue a 60); necesitan una pantalla que refresque así de rápido.')
+              ).grid(row=5, column=0, columnspan=2, sticky='w', pady=(8, 0))
+    graphics_status = tk.StringVar()
+    ttk.Label(graphics, textvariable=graphics_status, font=('Segoe UI', 10, 'bold')).grid(row=6, column=0, columnspan=2,
+                                                                                         sticky='w', pady=(10, 0))
+    loading_graphics = {'on': False}
+
+    def load_graphics():
+        folder = game_folder(game.get())
+        values = read_display(folder) if folder else read_display('')
+        loading_graphics['on'] = True
+        for key, (variable, options) in graphics_vars.items():
+            names = dict(options)
+            variable.set(tr(*names.get(values[key], options[0][1])))
+        fullscreen_var.set(values['fullscreen'] == 'yes')
+        loading_graphics['on'] = False
+        graphics_status.set('' if folder else tr('Choose the game\'s folder above first.',
+                                                 'Elige primero arriba la carpeta del juego.'))
+
+    def save_graphics():
+        if loading_graphics['on']:
+            return
+        folder = game_folder(game.get())
+        if not folder:
+            graphics_status.set(tr('Choose the game\'s folder above first.', 'Elige primero arriba la carpeta del juego.'))
+            return
+        chosen = {}
+        for key, (variable, options) in graphics_vars.items():
+            by_label = {tr(*names): value for value, names in options}
+            chosen[key] = by_label.get(variable.get(), options[0][0])
+        try:
+            write_display(folder, fullscreen_var.get(), chosen['resolution'], chosen['frame_rate'], chosen['anisotropic'])
+            graphics_status.set(tr('Saved: it applies the next time the game starts.',
+                                   'Guardado: se aplica la próxima vez que abras el juego.'))
+        except OSError as error:
+            graphics_status.set(tr('Could not save: %s', 'No se pudo guardar: %s') % error)
+
     # ------------------------------------------------ Tekken 7's fighters
-    frame = ttk.LabelFrame(root, text=tr('Tekken 7 fighters', 'Luchadores de Tekken 7'), padding=10)
-    frame.pack(fill='both', expand=True, padx=12, pady=10)
+    frame = ttk.Frame(tabs, padding=10)
+    tabs.add(frame, text=tr('Tekken 7 fighters', 'Luchadores de Tekken 7'))
     frame.columnconfigure(0, weight=1)
     ttk.Label(frame, wraplength=720, justify='left', text=tr(
         'From your own Tekken 7 (its folder above). Steam must be installed and signed in to the account that bought '

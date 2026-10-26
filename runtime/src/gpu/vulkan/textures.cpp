@@ -15,6 +15,7 @@
 #include "gx2/internal.h"
 
 #include "cafe/runtime.h"
+#include "host/display_settings.h"
 
 #include <algorithm>
 #include <array>
@@ -645,6 +646,21 @@ VkSampler Renderer::sampler(const uint32_t words[3], const float border[4], bool
         sci.anisotropyEnable = VK_TRUE;
         sci.maxAnisotropy = std::min<float>(static_cast<float>(1u << std::min(aniso, 4u)),
                                             ctx_.properties.limits.maxSamplerAnisotropy);
+    }
+    // display.ini's anisotropic filtering: at least that much on every
+    // filtered texture (where the device has the feature).
+    if (const uint32_t forced = host::display::active().anisotropy; forced > 1 && sci.minFilter == VK_FILTER_LINEAR) {
+        static const bool supported = [&] {
+            VkPhysicalDeviceFeatures features{};
+            vkGetPhysicalDeviceFeatures(ctx_.physical, &features);
+            return features.samplerAnisotropy == VK_TRUE;
+        }();
+        if (supported) {
+            const float base = sci.anisotropyEnable ? sci.maxAnisotropy : 1.0f;
+            sci.anisotropyEnable = VK_TRUE;
+            sci.maxAnisotropy = std::min(std::max(base, static_cast<float>(forced)),
+                                         ctx_.properties.limits.maxSamplerAnisotropy);
+        }
     }
     if (compare) {
         sci.compareEnable = VK_TRUE;

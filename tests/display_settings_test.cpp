@@ -339,6 +339,34 @@ void test_format() {
         check(lines[4].starts_with("interpolation = yes  # "), "interpolation line: " + lines[4]);
     }
 
+    // The frame rate and the anisotropic filtering: written only when set, read back.
+    for (const uint32_t rate : {0u, 60u, 120u, 180u, 240u}) {
+        for (const uint32_t aniso : {0u, 2u, 4u, 8u, 16u}) {
+            display::Settings settings;
+            settings.frame_rate = rate;
+            settings.anisotropy = aniso;
+            const std::string written = display::format(settings);
+            const display::Parsed parsed = display::parse(written);
+            check(parsed.settings == settings && parsed.warnings.empty() &&
+                      parsed.given == 3u + (rate != 0) + (aniso != 0) &&
+                      (written.find("frame_rate") != std::string::npos) == (rate != 0) &&
+                      (written.find("anisotropic") != std::string::npos) == (aniso != 0),
+                  "frame rate " + std::to_string(rate) + ", anisotropic " + std::to_string(aniso));
+        }
+    }
+    {
+        const display::Parsed named = display::parse("frame_rate = auto\nanisotropic = game\n");
+        check(named.settings == display::Settings{} && named.given == 2 && named.warnings.empty(), "auto and game");
+        const display::Parsed bad = display::parse("frame_rate = 90\nanisotropic = 3\n");
+        check(bad.settings == display::Settings{} && bad.warnings.size() == 2, "other frame rates and filterings");
+        std::vector<std::string> log;
+        display::Settings fast;
+        fast.frame_rate = 240;
+        fast.anisotropy = 16;
+        const display::Active active = display::resolve(fast, nullptr, nullptr, nullptr, log);
+        check(active.fps == 240 && active.anisotropy == 16, "the frame rate over interpolation, the filtering");
+    }
+
     // Everything the launcher can write is read back as it was meant.
     for (const bool fullscreen : {false, true}) {
         for (const Resolution resolution : display::kResolutions) {

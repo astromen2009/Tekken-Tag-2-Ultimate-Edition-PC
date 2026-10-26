@@ -11,6 +11,16 @@
 //                   5120x2880    the size the game draws at; auto
 //   interpolation = yes | no     120 frames per second on displays of 100 Hz
 //                                and more (60 below); yes
+//   frame_rate    = auto | 60 | 120 | 180 | 240
+//                                frames shown per second, whatever the
+//                                display (over interpolation); auto
+//   anisotropic   = game | 2 | 4 | 8 | 16
+//                                textures' anisotropic filtering at least
+//                                this (sharper at grazing angles); game: as
+//                                the title asks
+//
+// (The last two are written only when they are not their defaults, so that
+// a file of the first three stays as it was.)
 //
 // The environment's TTT2_FULLSCREEN, TTT2_SCALE and TTT2_FPS still win.
 // No SDL here: the launcher builds this file too, so that what it writes
@@ -35,6 +45,8 @@ struct Settings {
     bool fullscreen = false;
     Resolution resolution = Resolution::kAuto;
     bool interpolation = true;
+    uint32_t frame_rate = 0; // 0: auto (by interpolation)
+    uint32_t anisotropy = 0; // 0: as the title asks
     bool operator==(const Settings&) const = default;
 };
 
@@ -102,6 +114,7 @@ struct Active {
     bool fullscreen = false;
     float scale = 0;  // 0: automatic, auto_scale() of the display
     uint32_t fps = 0; // 0: 120 on displays of 100 Hz and more, else 60
+    uint32_t anisotropy = 0; // 0: as the title asks, else at least this
     bool operator==(const Active&) const = default;
 };
 

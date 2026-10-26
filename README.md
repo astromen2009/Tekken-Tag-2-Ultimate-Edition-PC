@@ -312,13 +312,16 @@ in a window, the resolution it draws at (Automatic, the default, is enough
 to cover your main display) and whether it shows 120 frames per second on
 displays of 100 Hz and more (on by default). They are kept in
 `~/.config/ttt2/display.ini` (`$XDG_CONFIG_HOME/ttt2/`; on Windows
-`%APPDATA%\ttt2\display.ini`), which can be edited by hand too (on
-Windows, the only way, as the launcher is Linux's):
+`%APPDATA%\ttt2\display.ini`, or `<install>\data\display.ini` for an
+install made by the Windows installer), which can be edited by hand too (on
+Windows, TTT2 Ultimate Launcher's Graphics tab writes it):
 
 ```ini
 fullscreen = no             # yes or no
 resolution = auto           # auto, 1280x720, 1920x1080, 2560x1440, 3840x2160 or 5120x2880
 interpolation = yes         # yes or no (no: 60 frames per second)
+frame_rate = auto           # auto, 60, 120, 180 or 240 (over interpolation; optional)
+anisotropic = game          # game, 2, 4, 8 or 16: textures' anisotropic filtering at least this (optional)
 ```
 
 The game reads it when it starts, so a change applies the next time. The
